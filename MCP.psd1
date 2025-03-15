@@ -30,7 +30,7 @@
   Copyright             = 'Copyright © 2025 alain. All rights reserved.'
 
   # Description of the functionality provided by this module
-  Description           = 'Provides basic MCP implementation, allowing creation of MCP servers and clients'
+  Description           = 'Provides core framework for building MCP-compliant AI agents and tools in PowerShell.'
 
   # Minimum version of the PowerShell engine required by this module
   PowerShellVersion     = '7.5'

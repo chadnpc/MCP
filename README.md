@@ -3,7 +3,7 @@
 
 Provides core framework for building MCP-compliant AI agents and tools in PowerShell.
 
-[![Build Module](https://github.com/chadnpc/MCP/actions/workflows/build_module.yaml/badge.svg)](https://github.com/chadnpc/MCP/actions/workflows/build_module.yaml)
+[![Build Module](https://github.com/chadnpc/MCP/actions/workflows/build.yaml/badge.svg)](https://github.com/chadnpc/MCP/actions/workflows/build.yaml)
 [![Downloads](https://img.shields.io/powershellgallery/dt/MCP.svg?style=flat&logo=powershell&color=blue)](https://www.powershellgallery.com/packages/MCP)
 
 ## Usage
