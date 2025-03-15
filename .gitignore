@@ -1,0 +1,6 @@
+﻿.env
+.env.local
+BuildOutput/
+LocalPSRepo/
+Tests/results.xml
+Tests/Resources/
