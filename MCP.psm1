@@ -577,31 +577,214 @@ class TextContent : Content {
   }
 }
 
-class McpSession {
-  # TODO: Add implementation
-  McpSession() {}
+<#
+.EXAMPLE
+# Create transport and session
+$transport = [StdioClientTransport]::new($serverParams)
+$session = [McpSession]::new($transport)
+
+# Register notification handler
+$session.RegisterNotificationHandler({
+    param($notification)
+    Write-Host "Received notification: $($notification.method)"
+})
+
+# Send request
+$request = [JSONRPCRequest]::new("2.0", "listTools", "123", $null)
+$response = $session.SendRequest($request)
+Write-Host "Response received: $($response | ConvertTo-Json)"
+
+# Send notification
+$notification = [JSONRPCNotification]::new("2.0", "logEvent", @{message = "Client connected"})
+$session.SendNotification($notification)
+
+# Close gracefully
+$session.CloseGracefully()
+#>
+class McpSession : McpObject {
+  [ClientMcpTransport]$Transport
+  [System.Collections.Concurrent.ConcurrentDictionary[string, [System.Threading.Tasks.TaskCompletionSource[Object]]]]$PendingRequests
+  [System.Collections.Generic.List[scriptblock]]$NotificationHandlers
+  [System.Threading.CancellationTokenSource]$CancellationTokenSource
+  [bool]$IsConnected
+  [DateTime]$LastActivity
+  [TimeSpan]$RequestTimeout = [TimeSpan]::FromSeconds(30)
+  [System.Collections.Concurrent.ConcurrentQueue[JSONRPCMessage]]$MessageQueue
+  [System.Threading.ManualResetEventSlim]$ConnectionLock = [System.Threading.ManualResetEventSlim]::new($true)
+
+  McpSession([ClientMcpTransport]$transport) {
+    if (!$transport) {
+      throw [ArgumentNullException]::new("transport")
+    }
+
+    $this.Transport = $transport
+    $this.PendingRequests = [System.Collections.Concurrent.ConcurrentDictionary[string, [System.Threading.Tasks.TaskCompletionSource[Object]]]]::new()
+    $this.NotificationHandlers = [System.Collections.Generic.List[scriptblock]]::new()
+    $this.MessageQueue = [System.Collections.Concurrent.ConcurrentQueue[JSONRPCMessage]]::new()
+    $this.CancellationTokenSource = [System.Threading.CancellationTokenSource]::new()
+
+    $this.InitializeTransportHandlers()
+  }
+
+  hidden [void] InitializeTransportHandlers() {
+    # Register transport message handler
+    $this.Transport.Connect({
+        param($message)
+        $this.MessageQueue.Enqueue($message)
+        $this.ProcessMessageQueue()
+      })
+
+    # Start background processing
+    $this.StartMessageProcessor()
+  }
+
+  hidden [void] StartMessageProcessor() {
+    Start-Job -Name "McpSessionProcessor" -ScriptBlock {
+      param([ref]$sessionRef)
+
+      $session = $sessionRef.Value
+      while (-not $session.CancellationTokenSource.IsCancellationRequested) {
+        try {
+          if ($session.MessageQueue.TryDequeue([ref]$message)) {
+            $session.ProcessIncomingMessage($message)
+          }
+          [System.Threading.Thread]::Sleep(100)
+        } catch {
+          Write-Error "Message processing error: $_"
+        }
+      }
+    } -ArgumentList ([ref]$this) | Out-Null
+  }
+
+  [void] Close() {
+    $this.CancellationTokenSource.Cancel()
+    $this.Transport.Close()
+    $this.IsConnected = $false
+    $this.ConnectionLock.Reset()
+  }
+
+  [void] CloseGracefully() {
+    $this.CancellationTokenSource.CancelAfter(5000)
+    $this.Transport.CloseGracefully()
+    $this.IsConnected = $false
+    $this.ConnectionLock.Set()
+  }
+
+  [Object] SendRequest([JSONRPCRequest]$request) {
+    $this.ValidateConnection()
+
+    $tcs = [System.Threading.Tasks.TaskCompletionSource[Object]]::new()
+    $this.PendingRequests[$request.id] = $tcs
+
+    try {
+      $this.Transport.SendMessage($request)
+      $this.LastActivity = [DateTime]::Now
+
+      return $tcs.Task.Wait($this.RequestTimeout, $this.CancellationTokenSource.Token)
+    } catch [System.OperationCanceledException] {
+      $this.PendingRequests.TryRemove($request.id, [ref]$null)
+      throw [McpError]::new("Request timed out", [ErrorCodes]::INVALID_REQUEST)
+    } finally {
+      $this.PendingRequests.TryRemove($request.id, [ref]$null)
+    }
+  }
+
+  [void] SendNotification([JSONRPCNotification]$notification) {
+    $this.ValidateConnection()
+    $this.Transport.SendMessage($notification)
+    $this.LastActivity = [DateTime]::Now
+  }
+
+  hidden [void] ProcessIncomingMessage([JSONRPCMessage]$message) {
+    try {
+      switch ($message) {
+        { $_ -is [JSONRPCResponse] } {
+          $this.HandleResponse($_)
+        }
+        { $_ -is [JSONRPCNotification] } {
+          $this.HandleNotification($_)
+        }
+        default {
+          Write-Warning "Received unknown message type: $($_.GetType().Name)"
+        }
+      }
+    } catch {
+      Write-Error "Error processing message: $_"
+    }
+  }
+
+  # hidden [void] HandleResponse([JSONRPCResponse]$response) {
+  #   if ($this.PendingRequests.TryGetValue($response.id, [ref]$tcs)) {
+  #     if ($response.error) {
+  #       $tcs.SetException([McpError]::new($response.error))
+  #     } else {
+  #       $tcs.SetResult($response.result)
+  #     }
+  #   }
+  # }
+
+  hidden [void] HandleNotification([JSONRPCNotification]$notification) {
+    foreach ($handler in $this.NotificationHandlers) {
+      try {
+        & $handler $notification
+      } catch {
+        Write-Error "Notification handler error: $_"
+      }
+    }
+  }
+
+  [void] RegisterNotificationHandler([scriptblock]$handler) {
+    $this.NotificationHandlers.Add($handler)
+  }
+
+  hidden [void] ValidateConnection() {
+    if (-not $this.IsConnected) {
+      throw [McpError]::new("Session is not connected", [ErrorCodes]::INVALID_REQUEST)
+    }
+
+    if ($this.ConnectionLock.Wait(5000)) {
+      $this.ConnectionLock.Reset()
+      try {
+        if (-not $this.Transport.IsConnected) {
+          $this.Transport.Connect()
+          $this.IsConnected = $true
+        }
+      } finally {
+        $this.ConnectionLock.Set()
+      }
+    } else {
+      throw [McpError]::new("Connection timeout", [ErrorCodes]::INTERNAL_ERROR)
+    }
+  }
+
+  [TimeSpan] GetIdleTime() {
+    return [DateTime]::Now - $this.LastActivity
+  }
+
+  [void] ResetTimeout([TimeSpan]$newTimeout) {
+    $this.RequestTimeout = $newTimeout
+    $this.CancellationTokenSource.CancelAfter($newTimeout)
+  }
 }
 
 class ClientMcpTransport {
-  # Placeholder for ClientMcpTransport interface/abstract class
-
-  Connect ([scriptblock]$handler) {
+  [void] Connect ([scriptblock]$handler) {
     throw [NotImplementedException]::new("Connect method must be implemented by derived classes")
   }
 
-  SendMessage ([JSONRPCMessage]$message) {
+  [void] SendMessage ([JSONRPCMessage]$message) {
     throw [NotImplementedException]::new("SendMessage method must be implemented by derived classes")
   }
 
-  CloseGracefully () {
+  [void] CloseGracefully () {
     throw [NotImplementedException]::new("CloseGracefully method must be implemented by derived classes")
   }
 
-  Close () {
+  [void] Close () {
     $this.CloseGracefully() #Default close implementation can call Gracefully and subscribe
   }
 
-  UnmarshalFrom ([Object]$data, [type]$typeRef) {
+  [void] UnmarshalFrom ([Object]$data, [type]$typeRef) {
     throw [NotImplementedException]::new("UnmarshalFrom method must be implemented by derived classes")
   }
 }
@@ -1061,7 +1244,7 @@ class McpSyncClient : McpClient {
   }
 
   [void] CloseGracefully () {
-    $this.Delegate.CloseGracefully() #.Block([TimeSpan]::FromMilliseconds(10000)) #Duration.ofMillis(DEFAULT_CLOSE_TIMEOUT_MS)
+    $this.Delegate.CloseGracefully()
   }
 
   [InitializeResult] Initialize () {
@@ -1129,7 +1312,7 @@ class McpSyncClient : McpClient {
   }
 
   [ListPromptsResult] ListPrompts () {
-    return $this.Delegate.ListPrompts()#.Block()
+    return $this.Delegate.ListPrompts()
   }
 
   [ListPromptsResult] ListPromptsCursor ([string]$cursor) {
@@ -1141,7 +1324,7 @@ class McpSyncClient : McpClient {
   }
 
   [GetPromptResult] SetLoggingLevel ([LoggingLevel]$loggingLevel) {
-    return $this.Delegate.SetLoggingLevel($loggingLevel)#.Block()
+    return $this.Delegate.SetLoggingLevel($loggingLevel)
   }
 }
 
