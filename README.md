@@ -19,6 +19,23 @@ Import-Module MCP
 # do stuff here.
 ```
 
+## Changelog
+
+- Better type safety and serialization
+
+- Multiple transport implementations
+
+- Simplified facade interface
+
+- Proper async/sync separation
+
+- Enhanced error handling
+
+- Full JSON-RPC compliance
+
+- Better support for protocol negotiation
+
+
 ## License
 
 This project is licensed under the [WTFPL License](LICENSE).
