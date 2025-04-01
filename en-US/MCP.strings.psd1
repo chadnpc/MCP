@@ -1,7 +1,7 @@
 ﻿
 @{
   ModuleName    = 'MCP'
-  ModuleVersion = '0.1.0'
+  ModuleVersion = '0.1.1'
   ReleaseNotes  = '# Release Notes MCPv<ModuleVersion>
 
 - Better type safety and serialization
