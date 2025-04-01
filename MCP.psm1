@@ -617,6 +617,7 @@ class McpTransport : IDisposable {
   [McpLogger]$Logger
   [string]$TransportId # Unique ID for this transport instance
 
+  McpTransport() {}
   McpTransport([McpLogger]$logger) {
     $this.Logger = $logger ?? [McpNullLogger]::Instance()
     # Using a ConcurrentQueue wrapped by BlockingCollection by default
@@ -1780,6 +1781,8 @@ class McpServer : IDisposable {
 # .DESCRIPTION
 #   Provides basic MCP implementation, allowing creation of MCP servers and clients.
 class MCP {
+  static [Stream]$stdin = ([ref][Console]::OpenStandardInput()).Value
+  static [Stream]$stdout = ([ref][Console]::OpenStandardOutput()).Value
   # .SYNOPSIS
   #   Provides static factory methods to create MCP Clients and start MCP Servers.
   # .DESCRIPTION
@@ -1881,12 +1884,8 @@ class MCP {
   # Static method to start a server listening (currently Stdio only).
   # Returns an McpServer instance ready to have handlers registered.
   # The caller's script must remain running for the server to operate.
-  static [McpServer] StartServer(
-    [McpServerOptions]$Options,
-    [Stream]$InputStream = ($stdin = [Console]::OpenStandardInput()), # Capture stdin ref
-    [Stream]$OutputStream = ($stdout = [Console]::OpenStandardOutput()) # Capture stdout ref
-    # Add params for other transports later (e.g., -Port for SSE)
-  ) {
+  static [McpServer] StartServer([McpServerOptions]$Options, [Stream]$InputStream, [Stream]$OutputStream) {
+    # TODO: Add params for other transports later (e.g., -Port for SSE)
     $serverOptions = $Options # Use provided options
     $serverLogger = $serverOptions.Logger ?? [McpConsoleLogger]::new([McpLoggingLevel]::Info, "MCP-Server")
     $serverOptions.Logger = $serverLogger # Ensure options has logger
@@ -1898,7 +1897,7 @@ class MCP {
     try {
       # --- Transport Creation (Stdio Server Mode) ---
       $serverLogger.Log([McpLoggingLevel]::Info, "Creating Stdio server transport using console streams.")
-      if (($InputStream -eq $stdin -and [Console]::IsInputRedirected) -or ($OutputStream -eq $stdout -and ([Console]::IsOutputRedirected -or [Console]::IsErrorRedirected))) {
+      if (($InputStream -eq [MCP]::stdin -and [Console]::IsInputRedirected) -or ($OutputStream -eq [MCP]::stdout -and ([Console]::IsOutputRedirected -or [Console]::IsErrorRedirected))) {
         $serverLogger.Log([McpLoggingLevel]::Warning, "Console streams appear redirected. Stdio transport might not work as expected.")
       }
       # Using Stdio Server Mode constructor
