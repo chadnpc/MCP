@@ -1,5 +1,6 @@
-﻿
-## [MCP](https://www.powershellgallery.com/packages/MCP) 1.0.2α
+﻿## [![MCP](docs/images/MCP.png)](https://www.powershellgallery.com/packages/MCP)
+
+`PowerShell module` ver **0.1.1 α**
 
 Provides core framework for building MCP-compliant AI agents and tools in PowerShell.
 
