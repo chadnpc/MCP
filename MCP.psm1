@@ -756,7 +756,7 @@ class McpStdioTransport : McpTransport {
 
         # Stderr Handler
         $stderrHandler = [DataReceivedEventHandler] {
-          param($sender, $e)
+          param($local:sender, $e)
           if ($null -ne $e.Data) { $this.Logger.Log([McpLoggingLevel]::Error, "[STDERR] $($e.Data)") }
         }.GetNewClosure() # Capture $this (logger)
         $this._process.add_ErrorDataReceived($stderrHandler)
@@ -776,7 +776,6 @@ class McpStdioTransport : McpTransport {
         $this.StartReceivingJob()
         $this.IsConnected = $true
         $this.Logger.Log([McpLoggingLevel]::Info, "Stdio process started (PID: $($this._process.Id)), transport connected.")
-
       } catch {
         $this.Logger.Log([McpLoggingLevel]::Critical, "Failed to start stdio process: $($_.Exception.ToString())")
         try { $this.Dispose() } catch { $null } # Cleanup on failure
@@ -873,7 +872,7 @@ class McpStdioTransport : McpTransport {
     Register-ObjectEvent -InputObject $this._stdoutJob -EventName StateChanged -Action {
       param($local:sender, $local:eventArgs)
       $job = $sender -as [System.Management.Automation.Job]
-      $transport = $job.PSJobTypeName # Hack: Store transport ID here? Better way? Maybe store transport in $job.PrivateData?
+      $job.PrivateData = $job.PSJobTypeName # Hack: Store transport ID
       if ($job.State -in 'Failed', 'Stopped', 'Completed') {
         Write-Host "Stdio Job $($job.Id) finished with State: $($job.State)"
         # TODO: Trigger transport disconnect/cleanup from here if needed
