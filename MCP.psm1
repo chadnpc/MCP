@@ -150,7 +150,7 @@ class JSONRPCMessage : McpObject {
   }
 
   JSONRPCMessage([string]$method, [guid]$id) {
-    if (-not $method) {
+    if (!$method) {
       throw [ArgumentException]::new("Method name cannot be empty")
     }
 
@@ -667,7 +667,7 @@ class TextContent : Content {
   $session.CloseGracefully()
 #>
 class McpSession : IDisposable {
-  hidden [McpITransport]$_transport
+  hidden [McpTransport]$_transport
   hidden [McpRequestHandlers]$_requestHandlers
   hidden [McpNotificationHandlers]$_notificationHandlers
   hidden [ILogger]$_logger
@@ -677,7 +677,7 @@ class McpSession : IDisposable {
   [string] $EndpointName
 
   McpSession(
-    [McpITransport]$transport,
+    [McpTransport]$transport,
     [string]$endpointName,
     [McpRequestHandlers]$requestHandlers,
     [McpNotificationHandlers]$notificationHandlers,
@@ -748,7 +748,7 @@ class McpSession : IDisposable {
 
   hidden [Task] HandleRequestAsync([McpJsonRpcRequest]$request, [CancellationToken]$cancellationToken) {
     $handler = $null
-    if (-not $this._requestHandlers.TryGetValue($request.Method, [ref]$handler)) {
+    if (!$this._requestHandlers.TryGetValue($request.Method, [ref]$handler)) {
       $this._logger.LogWarning("No handler for '$($request.Method)'")
       $errRsp = [McpJsonRpcError]@{Id = $request.Id; Error = [McpJsonRpcErrorDetail]@{Code = [McpErrorCodes]::MethodNotFound; Message = "NotFound:" + $request.Method } }
       $sendErrorTask = $this._transport.SendMessageAsync($errRsp, [CancellationToken]::None) # Send error without token? Or use original? None safer.
@@ -799,7 +799,7 @@ class McpSession : IDisposable {
 
   hidden HandleResponseOrError([McpIJsonRpcMessage]$message) {
     $messageWithId = $message -as [McpIJsonRpcMessageWithId]
-    if ($null -eq $messageWithId -or -not $messageWithId.Id.IsValid()) { $this._logger.LogWarning('Invalid resp/err ID'); return }
+    if ($null -eq $messageWithId -or !$messageWithId.Id.IsValid()) { $this._logger.LogWarning('Invalid resp/err ID'); return }
     $tcs = $null
     if ($this._pendingRequests.TryRemove($messageWithId.Id, [ref]$tcs)) {
       $idStr = $messageWithId.Id.ToString()
@@ -814,7 +814,7 @@ class McpSession : IDisposable {
 
   hidden [Task] HandleNotificationAsync([McpJsonRpcNotification]$notification, [CancellationToken]$cancellationToken) {
     $handlers = $null
-    if (-not $this._notificationHandlers.TryGetValue($notification.Method, [ref]$handlers)) {
+    if (!$this._notificationHandlers.TryGetValue($notification.Method, [ref]$handlers)) {
       $this._logger.LogTrace("No handler for notification '$($notification.Method)'")
       return [Task]::CompletedTask
     }
@@ -832,11 +832,11 @@ class McpSession : IDisposable {
   }
 
   [Task[object]] SendRequestAsync([McpJsonRpcRequest]$request, [Type]$expectedResultType, [CancellationToken]$cancellationToken) {
-    if (-not $this._transport.IsConnected) { throw [McpClientException]::new("Not connected") }
+    if (!$this._transport.IsConnected) { throw [McpClientException]::new("Not connected") }
     $requestIdNum = [Interlocked]::Increment([ref]$this._nextRequestId)
     $request.Id = [McpRequestId]::FromNumber($requestIdNum)
     $tcs = [TaskCompletionSource[McpIJsonRpcMessage]]::new([TaskCreationOptions]::RunContinuationsAsynchronously)
-    if (-not $this._pendingRequests.TryAdd($request.Id, $tcs)) { throw [InvalidOperationException]("ID collision?") }
+    if (!$this._pendingRequests.TryAdd($request.Id, $tcs)) { throw [InvalidOperationException]("ID collision?") }
     $this._logger.LogTrace("Sending req '$($request.Method)' ID '$($request.Id)'")
     $sendTask = $this._transport.SendMessageAsync($request, $cancellationToken)
 
@@ -857,8 +857,8 @@ class McpSession : IDisposable {
     return $sendTask.ContinueWith(
       [Func[Task, Task[object]]] {
         param($st)
-        if ($st.IsFaulted) { $rmTcs = $null; $this._pendingRequests.TryRemove($request.Id, [ref]$rmTcs) | Out-Null; $rmTcs?.TrySetException($st.Exception.InnerExceptions[0]) | Out-Null; throw $st.Exception.InnerExceptions[0] }
-        if ($st.IsCanceled) { $rmTcs = $null; $this._pendingRequests.TryRemove($request.Id, [ref]$rmTcs) | Out-Null; $rmTcs?.TrySetCanceled($cancellationToken) | Out-Null; throw [OperationCanceledException]::new($cancellationToken) }
+        if ($st.IsFaulted) { $rmTcs = $null; $this._pendingRequests.TryRemove($request.Id, [ref]$rmTcs) | Out-Null; $rmTcs.TrySetException($st.Exception.InnerExceptions[0]) | Out-Null; throw $st.Exception.InnerExceptions[0] }
+        if ($st.IsCanceled) { $rmTcs = $null; $this._pendingRequests.TryRemove($request.Id, [ref]$rmTcs) | Out-Null; $rmTcs.TrySetCanceled($cancellationToken) | Out-Null; throw [OperationCanceledException]::new($cancellationToken) }
         return $processResponseTask
       }, $cancellationToken
     ).Unwrap()
@@ -947,7 +947,7 @@ class HttpClientTransport : ClientMcpTransport {
         $stream = $response.Content.ReadAsStreamAsync().Result
         $reader = [System.IO.StreamReader]::new($stream)
 
-        while (-not $cts.Token.IsCancellationRequested) {
+        while (!$cts.Token.IsCancellationRequested) {
           $line = $reader.ReadLine()
           if ($null -eq $line) { continue }
 
@@ -1750,7 +1750,7 @@ class StdioClientTransport : ClientMcpTransport {
       # Start reading output in a background job (similar to async handling)
       Start-Job -Name "MCPTransportReader" -ScriptBlock {
         param($reader, $mapper, $handler)
-        while (-not $reader.EndOfStream) {
+        while (!$reader.EndOfStream) {
           $line = $reader.ReadLine()
           try {
             $message = $mapper.Deserialize($line, [JSONRPCMessage])
@@ -1784,7 +1784,7 @@ class StdioClientTransport : ClientMcpTransport {
       try {
         $this.Process.Kill() #Or .CloseMainWindow() for graceful shutdown attempt?
         $this.Process.WaitForExit(5000) # Wait max 5 seconds for exit
-        if (-not $this.Process.HasExited) {
+        if (!$this.Process.HasExited) {
           Write-Warning "Process did not exit gracefully within timeout."
           $this.Process.Kill() # Force kill if still running
         }
@@ -1837,97 +1837,6 @@ class ServerParameters {
   }
 }
 
-
-# Main class
-class MCP {
-  # .SYNOPSIS
-  #   Model Context Protocol
-  # .DESCRIPTION
-  #   Provides basic MCP implementation, allowing creation of MCP servers and clients.
-  [McpSyncClient]$SyncClient
-  [McpAsyncClient]$AsyncClient
-  [ClientMcpTransport]$Transport
-  [ObjectMapper]$Mapper
-
-  MCP([ClientMcpTransport]$transport) {
-    $this.Transport = $transport
-    $this.Mapper = [ObjectMapper]::new()
-    $this.AsyncClient = [McpAsyncClient]::new($transport, [TimeSpan]::FromSeconds(30), $null)
-    $this.SyncClient = [McpSyncClient]::new($this.AsyncClient)
-  }
-
-  [void] Initialize() {
-    $this.SyncClient.Initialize() | Out-Null
-  }
-
-  [string] Ping() {
-    return $this.SyncClient.Ping()
-  }
-
-  [ListToolsResult] ListTools() {
-    return $this.SyncClient.ListTools()
-  }
-
-  [CallToolResult] CallTool([string]$toolName, [hashtable]$arguments) {
-    $request = [CallToolRequest]::new($toolName, $arguments)
-    return $this.SyncClient.CallTool($request)
-  }
-
-  [ListResourcesResult] ListResources() {
-    return $this.SyncClient.ListResources()
-  }
-
-  [ReadResourceResult] ReadResource([string]$uri) {
-    $request = [ReadResourceRequest]::new($uri)
-    return $this.SyncClient.ReadResourceRequest($request)
-  }
-
-  static [MCP] Create([ClientMcpTransport]$transport) {
-    return [MCP]::new($transport)
-  }
-
-  static [McpClientAsyncSpec] async ([ClientMcpTransport]$transport) {
-    return [McpClientAsyncSpec]::new($transport)
-  }
-
-  static  [McpClientSyncSpec] sync ([ClientMcpTransport]$transport) {
-    return  [McpClientSyncSpec]::new($transport)
-  }
-}
-
-#region    UsageExample
-# .EXAMPLE
-<# Example usage with HTTP transport
-Write-Host "--- MCP PowerShell SDK Example Usage ---"
-$httpTransport = [HttpClientTransport]::new("http://localhost:8080/mcp")
-$mcp = [MCP]::Create($httpTransport)
-$mcp.Initialize()
-
-# Get available tools
-$tools = $mcp.ListTools()
-$tools.tools | ForEach-Object {
-    Write-Host "Tool: $($_.Name) - $($_.Description)"
-}
-
-# Call a tool
-$result = $mcp.CallTool("weatherTool", @{ location = "New York" })
-Write-Host "Tool result: $($result.Content.Text)"
-
-# Example with Stdio transport
-$serverParams = [ServerParameters]::new("node")
-    .AddArgs(@("mcp-server.js", "--port=8080"))
-    .AddEnv(@{ MCP_ENV = "production" })
-    .Build()
-
-$stdioTransport = [StdioClientTransport]::new($serverParams)
-$mcp = [MCP]::Create($stdioTransport)
-$mcp.Initialize()
-#>
-#endregion UsageExample
-
-
-
-
 class EventId {
   [int] $Id
   [string] $Name
@@ -1947,36 +1856,34 @@ class ILogger {
     $state,
     [Exception]$exception,
     [Func[object, Exception, string]]$formatter
-  ) { throw [NotImplementedException] }
+  ) { throw [NotImplementedException]::new("Not yet implemented!") }
 }
 class ILoggerProvider : IDisposable {
-  # CreateLogger([string]$categoryName) { throw [NotImplementedException]; return $null }
-  [void] Dispose() { throw [NotImplementedException] }
+  CreateLogger([string]$categoryName) { throw [NotImplementedException]::new("Not yet implemented!") }
+  [void] Dispose() { throw [NotImplementedException]::new("Not yet implemented!") }
 }
-# if (-not (Get-Type -TypeName 'Microsoft.Extensions.Logging.ILoggerProvider' -ErrorAction SilentlyContinue)) {
-#   Write-Warning "Defining placeholder interface (as class) for Microsoft.Extensions.Logging.ILoggerProvider."
-# }
 
 class ILoggerFactory : IDisposable {
-  # CreateLogger([string]$categoryName) { throw [NotImplementedException]; return $null }
-  AddProvider([ILoggerProvider]$provider) { throw [NotImplementedException] }
-  [void] Dispose() { throw [NotImplementedException] }
+  CreateLogger([string]$categoryName) { throw [NotImplementedException]::new("Not yet implemented!") }
+  AddProvider([ILoggerProvider]$provider) { throw [NotImplementedException]::new("Not yet implemented!") }
+  [void] Dispose() { throw [NotImplementedException]::new("Not yet implemented!") }
 }
 
-class NullLoggerImpl : ILogger {
-  # Inherit from placeholder ILogger
-  hidden static [NullLoggerImpl] $_instance = [NullLoggerImpl]::new()
-  # static [NullLoggerImpl] Instance { get { return [NullLoggerImpl]::$_instance } }
-
-  # BeginScope($state) { return $null } # Return null disposable
-  # IsEnabled([LogLevel]$logLevel) { return $false }
+class NullLogger : ILogger {
+  static [NullLogger] $Instance
+  NullLogger() {
+    [NullLogger]::Instance = $this
+  }
+  [void] BeginScope($state) { }
+  [bool] IsEnabled([LogLevel]$logLevel) {
+    return $false
+  }
   Log([LogLevel]$logLevel, [EventId]$eventId, $state, [Exception]$exception, [Func[object, Exception, string]]$formatter) {
     # No-op
   }
 }
 
 class NullLoggerFactoryImpl : ILoggerFactory {
-  # Inherit from placeholder ILoggerFactory
   hidden static [NullLoggerFactoryImpl] $_instance = [NullLoggerFactoryImpl]::new()
   # static [NullLoggerFactoryImpl] Instance { get { return [NullLoggerFactoryImpl]::$_instance } }
 
@@ -1998,23 +1905,6 @@ class AIFunction {
   }
 }
 
-class NullLogger {
-  # Does not implement ILogger formally here, just duck-typing
-  hidden static [NullLogger] $_instance = [NullLogger]::new()
-  # static [NullLogger] Instance { get { return [NullLogger]::$_instance } }
-
-  # BeginScope($state) { return $null } # Return null or a dummy scope object?
-  # IsEnabled([LogLevel]$logLevel) { return $false }
-  Log(
-    [LogLevel]$logLevel,
-    [EventId]$eventId,
-    $state,
-    [Exception]$exception,
-    [Func[object, Exception, string]]$formatter # Adjust TState to object
-  ) {
-    # No-op
-  }
-}
 class NullLoggerFactory {
   hidden static [NullLoggerFactory] $_instance = [NullLoggerFactory]::new()
   # static [NullLoggerFactory] Instance { get { return [NullLoggerFactory]::$_instance } }
@@ -2073,12 +1963,12 @@ class McpJsonUtilities {
 
 class McpImplementation {
   # Name of the implementation.
-  # [JsonPropertyName("name")] # Serialization hint
-  [string] $Name # required
+
+  [ValidateNotNullOrEmpty()][string] $Name # required
 
   # Version of the implementation.
   # [JsonPropertyName("version")] # Serialization hint
-  [string] $Version # required
+  [ValidateNotNullOrEmpty()][string] $Version # required
 
   McpImplementation([string]$Name, [string]$Version) {
     if ([string]::IsNullOrWhiteSpace($Name)) { throw [ArgumentNullException]::new("Name") }
@@ -2100,7 +1990,7 @@ class McpAnnotations {
 
 class McpArgument {
   # The name of the argument.
-  # [JsonPropertyName("name")] # Serialization hint
+
   [string] $Name = ''
 
   # The value of the argument to use for completion matching.
@@ -2111,7 +2001,7 @@ class McpArgument {
 # Base class for Resource Contents
 class McpResourceContents {
   # The URI of the resource.
-  # [JsonPropertyName("uri")] # Serialization hint
+
   [string] $Uri = ''
 
   # The MIME type of the content.
@@ -2138,7 +2028,7 @@ class McpTextResourceContents : McpResourceContents {
 class McpContent {
   # The type of content: "image", "audio", "text", "resource".
   # [JsonPropertyName("type")] # Serialization hint
-  [string] $Type = '' # required
+  [ValidateNotNullOrEmpty()][string] $Type = ' ' # required
 
   # Text content. Used when Type is "text".
   # [JsonPropertyName("text")] # Serialization hint
@@ -2185,11 +2075,11 @@ class McpToolAnnotations {
 
 class McpTool {
   # The name of the tool.
-  # [JsonPropertyName("name")] # Serialization hint
-  [string] $Name = '' # required
+
+  [ValidateNotNullOrEmpty()][string] $Name = ' ' # required
 
   # A human-readable description of the tool.
-  # [JsonPropertyName("description")] # Serialization hint
+
   [Nullable[string]] $Description
 
   # JSON Schema object defining the expected parameters. Type must be 'object'.
@@ -2205,7 +2095,7 @@ class McpTool {
 class McpCompletion {
   # Array of completion values (max 100 items).
   # [JsonPropertyName("values")] # Serialization hint
-  [string[]] $Values = @() # required
+  [ValidateNotNullOrEmpty()][string[]] $Values # required
 
   # Total number of options available.
   # [JsonPropertyName("total")] # Serialization hint
@@ -2218,7 +2108,7 @@ class McpCompletion {
 
 class McpModelHint {
   # Hint for a model name (substring matching recommended).
-  # [JsonPropertyName("name")] # Serialization hint
+
   [Nullable[string]] $Name
 }
 
@@ -2265,11 +2155,9 @@ class McpModelPreferences {
 
 class McpPromptArgument {
   # Name of the argument.
-  # [JsonPropertyName("name")] # Serialization hint
-  [string] $Name = '' # required
+  [ValidateNotNullOrEmpty()][string] $Name = ' ' # required
 
   # Human-readable description.
-  # [JsonPropertyName("description")] # Serialization hint
   [Nullable[string]] $Description
 
   # Whether this argument must be provided.
@@ -2279,26 +2167,19 @@ class McpPromptArgument {
 
 class McpPrompt {
   # List of arguments for templating.
-  # [JsonPropertyName("arguments")] # Serialization hint
   [Nullable[List[McpPromptArgument]]] $Arguments
-
   # Optional description.
-  # [JsonPropertyName("description")] # Serialization hint
   [Nullable[string]] $Description
-
   # Name of the prompt or template.
-  # [JsonPropertyName("name")] # Serialization hint
-  [string] $Name = '' # required
+  [ValidateNotNullOrEmpty()][string] $Name = ' ' # required
 }
 
 class McpPromptMessage {
   # Content of the message.
-  # [JsonPropertyName("content")] # Serialization hint
-  [McpContent] $Content # required
+  [ValidateNotNullOrEmpty()][McpContent] $Content # required
 
   # Role ("user" or "assistant").
-  # [JsonPropertyName("role")] # Serialization hint
-  [McpRole] $Role # required
+  [ValidateNotNullOrEmpty()][McpRole] $Role # required
 
   McpPromptMessage() {
     $this.Content = [McpContent]::new()
@@ -2307,15 +2188,11 @@ class McpPromptMessage {
 
 class McpReference {
   # Type: "ref/resource" or "ref/prompt".
-  # [JsonPropertyName("type")] # Serialization hint
-  [string] $Type = '' # required
+  [ValidateNotNullOrEmpty()][string] $Type = ' ' # required
 
   # URI of the resource (if type is ref/resource).
-  # [JsonPropertyName("uri")] # Serialization hint
   [Nullable[string]] $Uri
-
   # Name of the prompt (if type is ref/prompt).
-  # [JsonPropertyName("name")] # Serialization hint
   [Nullable[string]] $Name
 
   [string] ToString() {
@@ -2359,15 +2236,12 @@ class McpRequestParams {
 
 class McpResource {
   # URI of the resource.
-  # [JsonPropertyName("uri")] # Serialization hint
-  [string] $Uri # required
+  [ValidateNotNullOrEmpty()][string] $Uri # required
 
   # Human-readable name.
-  # [JsonPropertyName("name")] # Serialization hint
-  [string] $Name # required
+  [ValidateNotNullOrEmpty()][string] $Name # required
 
   # Description of the resource.
-  # [JsonPropertyName("description")] # Serialization hint
   [Nullable[string]] $Description
 
   # MIME type, if known.
@@ -2386,47 +2260,41 @@ class McpResource {
 class McpResourceTemplate {
   # URI template (RFC 6570).
   # [JsonPropertyName("uriTemplate")] # Serialization hint
-  [string] $UriTemplate # required
+  [ValidateNotNullOrEmpty()][string] $UriTemplate # required
 
   # Human-readable name.
-  # [JsonPropertyName("name")] # Serialization hint
-  [string] $Name # required
+  [ValidateNotNullOrEmpty()][string] $Name # required
 
   # Description of the template.
-  # [JsonPropertyName("description")] # Serialization hint
   [Nullable[string]] $Description
 
   # MIME type, if known.
-  # [JsonPropertyName("mimeType")] # Serialization hint
   [Nullable[string]] $MimeType
 
   # Optional annotations.
-  # [JsonPropertyName("annotations")] # Serialization hint
   [Nullable[McpAnnotations]] $Annotations
 }
 
 class McpRoot {
   # URI of the root.
-  # [JsonPropertyName("uri")] # Serialization hint
+
   [string] $Uri # required
 
   # Human-readable name.
-  # [JsonPropertyName("name")] # Serialization hint
+
   [Nullable[string]] $Name
 
   # Additional metadata (reserved).
-  # [JsonPropertyName("meta")] # Serialization hint
+
   [object] $Meta
 }
 
 class McpSamplingMessage {
   # Text or image content.
-  # [JsonPropertyName("content")] # Serialization hint
-  [McpContent] $Content # required
+  [ValidateNotNullOrEmpty()][McpContent] $Content # required
 
   # Role ("user" or "assistant").
-  # [JsonPropertyName("role")] # Serialization hint
-  [McpRole] $Role # required
+  [ValidateNotNullOrEmpty()][McpRole] $Role # required
 }
 
 # --- Protocol/Messages ---
@@ -2458,11 +2326,11 @@ class McpRequestId {
   [bool] IsValid() { return $null -ne $this.Value }
 
   [string] AsString() {
-    if (-not $this.IsString()) { throw [InvalidOperationException]::new("RequestId is not a string") }
+    if (!$this.IsString()) { throw [InvalidOperationException]::new("RequestId is not a string") }
     return [string]$this.Value
   }
   [long] AsNumber() {
-    if (-not $this.IsNumber()) { throw [InvalidOperationException]::new("RequestId is not a number") }
+    if (!$this.IsNumber()) { throw [InvalidOperationException]::new("RequestId is not a number") }
     return [long]$this.Value
   }
   [string] ToString() { return "$($this.Value)" } # Implicit conversion for logging etc.
@@ -2481,40 +2349,30 @@ class McpIJsonRpcMessageWithId : McpIJsonRpcMessage {
 }
 
 class McpJsonRpcErrorDetail {
-  # [JsonPropertyName("code")] # Serialization hint
-  [int] $Code # required - Use McpErrorCodes enum
+  [ValidateNotNullOrEmpty()][int] $Code # required - Use McpErrorCodes enum
 
-  # [JsonPropertyName("message")] # Serialization hint
-  [string] $Message # required
+  [ValidateNotNullOrEmpty()][string] $Message # required
 
-  # [JsonPropertyName("data")] # Serialization hint
   [object] $Data
 }
 
 class McpJsonRpcError : McpIJsonRpcMessageWithId {
-  # [JsonPropertyName("error")] # Serialization hint
-  [McpJsonRpcErrorDetail] $Error # required
+  [ValidateNotNullOrEmpty()][McpJsonRpcErrorDetail] $Error # required
 }
 
 class McpJsonRpcNotification : McpIJsonRpcMessage {
-  # [JsonPropertyName("method")] # Serialization hint
-  [string] $Method # required
+  [ValidateNotNullOrEmpty()][string] $Method # required
 
-  # [JsonPropertyName("params")] # Serialization hint
   [object] $Params # Can be object or array, handled by serializer
 }
 
 class McpJsonRpcRequest : McpIJsonRpcMessageWithId {
-  # [JsonPropertyName("method")] # Serialization hint
-  [string] $Method # required
-
-  # [JsonPropertyName("params")] # Serialization hint
+  [ValidateNotNullOrEmpty()][string] $Method # required
   [object] $Params # Can be object or array, handled by serializer
 }
 
 class McpJsonRpcResponse : McpIJsonRpcMessageWithId {
-  # [JsonPropertyName("result")] # Serialization hint
-  [object] $Result # required (can be null JSON value)
+  [ValidateNotNullOrEmpty()][object] $Result # required (can be null JSON value)
 }
 
 class McpNotificationMethods {
@@ -2552,29 +2410,24 @@ class McpPaginatedResult {
 # --- Protocol/Types Request/Result pairs ---
 
 class McpCallToolRequestParams : McpRequestParams {
-  # [JsonPropertyName("name")] # Serialization hint
-  [string] $Name # required
-  # [JsonPropertyName("arguments")] # Serialization hint
+
+  [ValidateNotNullOrEmpty()][string] $Name # required
+
   [Nullable[Dictionary[string, object]]] $Arguments # Hashtable might also work
 }
 
 class McpCallToolResponse {
-  # [JsonPropertyName("content")] # Serialization hint
-  [List[McpContent]] $Content = @() # required (can be empty list)
-  # [JsonPropertyName("isError")] # Serialization hint
+  [ValidateNotNullOrEmpty()][List[McpContent]] $Content = @() # required (can be empty list)
   [bool] $IsError # required
 }
 
 class McpCompleteRequestParams : McpRequestParams {
-  # [JsonPropertyName("ref")] # Serialization hint
-  [McpReference] $Ref # required
-  # [JsonPropertyName("argument")] # Serialization hint
-  [McpArgument] $Argument # required
+  [ValidateNotNullOrEmpty()][McpReference] $Ref # required
+  [ValidateNotNullOrEmpty()][McpArgument] $Argument # required
 }
 
 class McpCompleteResult {
-  # [JsonPropertyName("completion")] # Serialization hint
-  [McpCompletion] $Completion # required
+  [ValidateNotNullOrEmpty()][McpCompletion] $Completion
 
   McpCompleteResult() {
     $this.Completion = [McpCompletion]::new()
@@ -2582,164 +2435,125 @@ class McpCompleteResult {
 }
 
 class McpCreateMessageRequestParams : McpRequestParams {
-  # [JsonPropertyName("includeContext")] # Serialization hint
   [Nullable[McpContextInclusion]] $IncludeContext
-  # [JsonPropertyName("maxTokens")] # Serialization hint
   [Nullable[int]] $MaxTokens
-  # [JsonPropertyName("messages")] # Serialization hint
-  [List[McpSamplingMessage]] $Messages # required, IReadOnlyList in C#
-  # [JsonPropertyName("metadata")] # Serialization hint
-  [object] $Metadata
-  # [JsonPropertyName("modelPreferences")] # Serialization hint
-  [Nullable[McpModelPreferences]] $ModelPreferences
-  # [JsonPropertyName("stopSequences")] # Serialization hint
+  [ValidateNotNullOrEmpty()][List[McpSamplingMessage]] $Messages # required, IReadOnlyList in C#
+  [ValidateNotNullOrEmpty()][object] $Metadata
+  [ValidateNotNullOrEmpty()][Nullable[McpModelPreferences]] $ModelPreferences
   [Nullable[List[string]]] $StopSequences # IReadOnlyList in C#
-  # [JsonPropertyName("systemPrompt")] # Serialization hint
   [Nullable[string]] $SystemPrompt
-  # [JsonPropertyName("temperature")] # Serialization hint
   [Nullable[float]] $Temperature
 }
 
 class McpCreateMessageResult {
-  # [JsonPropertyName("content")] # Serialization hint
-  [McpContent] $Content # required
-  # [JsonPropertyName("model")] # Serialization hint
-  [string] $Model # required
-  # [JsonPropertyName("stopReason")] # Serialization hint
+  [ValidateNotNullOrEmpty()][McpContent] $Content # required
+  [ValidateNotNullOrEmpty()][string] $Model # required
   [Nullable[string]] $StopReason
-  # [JsonPropertyName("role")] # Serialization hint
-  [string] $Role # required - Should match McpRole enum values "user" or "assistant"
+  [ValidateNotNullOrEmpty()][string] $Role # required - Should match McpRole enum values "user" or "assistant"
 }
 
 class McpEmptyResult {}
 
 class McpGetPromptRequestParams : McpRequestParams {
-  # [JsonPropertyName("name")] # Serialization hint
-  [string] $Name # required
-  # [JsonPropertyName("arguments")] # Serialization hint
+  [ValidateNotNullOrEmpty()][string] $Name # required
   [Nullable[Dictionary[string, object]]] $Arguments
 }
 
 class McpGetPromptResult {
-  # [JsonPropertyName("description")] # Serialization hint
-  [Nullable[string]] $Description
-  # [JsonPropertyName("messages")] # Serialization hint
-  [List[McpPromptMessage]] $Messages = @() # required
+  [ValidateNotNullOrEmpty()][Nullable[string]] $Description
+  [ValidateNotNullOrEmpty()][List[McpPromptMessage]] $Messages
 }
 
 class McpInitializeRequestParams : McpRequestParams {
-  # [JsonPropertyName("protocolVersion")] # Serialization hint
-  [string] $ProtocolVersion # required
-  # [JsonPropertyName("capabilities")] # Serialization hint
-  [Nullable[McpClientCapabilities]] $Capabilities
-  # [JsonPropertyName("clientInfo")] # Serialization hint
-  [McpImplementation] $ClientInfo # required
+  [ValidateNotNullOrEmpty()][string] $ProtocolVersion
+  [ValidateNotNullOrEmpty()][Nullable[McpClientCapabilities]] $Capabilities
+  [ValidateNotNullOrEmpty()][McpImplementation] $ClientInfo
 }
 
 class McpInitializeResult {
-  # [JsonPropertyName("protocolVersion")] # Serialization hint
-  [string] $ProtocolVersion # required
-  # [JsonPropertyName("capabilities")] # Serialization hint
-  [McpServerCapabilities] $Capabilities # required
-  # [JsonPropertyName("serverInfo")] # Serialization hint
-  [McpImplementation] $ServerInfo # required
-  # [JsonPropertyName("instructions")] # Serialization hint
-  [Nullable[string]] $Instructions
+  [ValidateNotNullOrEmpty()][string] $ProtocolVersion
+  [ValidateNotNullOrEmpty()][McpServerCapabilities] $Capabilities
+  [ValidateNotNullOrEmpty()][McpImplementation] $ServerInfo
+  [ValidateNotNullOrEmpty()][Nullable[string]] $Instructions
 }
 
 class McpListPromptsRequestParams {
-  # Not derived from McpRequestParams in C# schema? Seems like an oversight maybe. Added base class assumption.
-  # [JsonPropertyName("cursor")] # Serialization hint
   [Nullable[string]] $Cursor
 }
 
 class McpListPromptsResult : McpPaginatedResult {
-  # [JsonPropertyName("prompts")] # Serialization hint
-  [List[McpPrompt]] $Prompts = @() # required
+  [ValidateNotNullOrEmpty()][List[McpPrompt]] $Prompts = @() # required
 }
 
 class McpListResourceTemplatesRequestParams {
-  # [JsonPropertyName("cursor")] # Serialization hint
   [Nullable[string]] $Cursor
 }
 
 class McpListResourceTemplatesResult : McpPaginatedResult {
-  # [JsonPropertyName("resourceTemplates")] # Serialization hint
-  [List[McpResourceTemplate]] $ResourceTemplates = @() # required
+  [ValidateNotNullOrEmpty()][List[McpResourceTemplate]] $ResourceTemplates
 }
 
 class McpListResourcesRequestParams {
-  # [JsonPropertyName("cursor")] # Serialization hint
+
   [Nullable[string]] $Cursor
 }
 
 class McpListResourcesResult : McpPaginatedResult {
-  # [JsonPropertyName("resources")] # Serialization hint
-  [List[McpResource]] $Resources = @() # required
+  [ValidateNotNullOrEmpty()][List[McpResource]] $Resources = @()
 }
 
 class McpListRootsRequestParams {
-  # [JsonPropertyName("progressToken")] # Serialization hint
   [Nullable[string]] $ProgressToken
 }
 
 class McpListRootsResult {
-  # [JsonPropertyName("meta")] # Serialization hint
   [object] $Meta
-  # [JsonPropertyName("roots")] # Serialization hint
-  [List[McpRoot]] $Roots # required, IReadOnlyList in C#
+  [List[McpRoot]] $Roots
 }
 
 class McpListToolsRequestParams {
-  # [JsonPropertyName("cursor")] # Serialization hint
+
   [Nullable[string]] $Cursor
 }
 
 class McpListToolsResult : McpPaginatedResult {
-  # [JsonPropertyName("tools")] # Serialization hint
-  [List[McpTool]] $Tools = @() # required
+  [List[McpTool]] $Tools = @()
 }
 
 class McpLoggingMessageNotificationParams {
-  # [JsonPropertyName("level")] # Serialization hint
-  [McpLoggingLevel] $Level # required
-  # [JsonPropertyName("logger")] # Serialization hint
+  [McpLoggingLevel] $Level
   [Nullable[string]] $Logger
-  # [JsonPropertyName("data")] # Serialization hint
   [Nullable[System.Text.Json.JsonElement]] $Data # Use JsonElement for arbitrary JSON
 }
 
 class McpPingResult {} # Empty in C#
 
 class McpReadResourceRequestParams : McpRequestParams {
-  # [JsonPropertyName("uri")] # Serialization hint
-  [string] $Uri # required
+
+  [ValidateNotNullOrEmpty()][string] $Uri # required
 }
 
 class McpReadResourceResult {
-  # [JsonPropertyName("contents")] # Serialization hint
-  [List[McpResourceContents]] $Contents = @() # required
+
+  [ValidateNotNullOrEmpty()][List[McpResourceContents]] $Contents = @() # required
 }
 
 class McpResourceUpdatedNotificationParams {
-  # [JsonPropertyName("uri")] # Serialization hint
-  [string] $Uri # required
+
+  [ValidateNotNullOrEmpty()][string] $Uri # required
 }
 
 class McpSetLevelRequestParams : McpRequestParams {
-  # [JsonPropertyName("level")] # Serialization hint
-  [McpLoggingLevel] $Level # required
+  [ValidateNotNullOrEmpty()][McpLoggingLevel] $Level # required
 }
 
 class McpSubscribeRequestParams : McpRequestParams {
-  # [JsonPropertyName("uri")] # Serialization hint
-  [string] $Uri # required
+  [ValidateNotNullOrEmpty()][string] $Uri # required
 }
 
 class McpUnsubscribeRequestParams : McpRequestParams {
   # Used for unsubscribe
-  # [JsonPropertyName("uri")] # Serialization hint
-  [string] $Uri # required
+  [ValidateNotNullOrEmpty()][string] $Uri # required
 }
 
 # Note: C# has UnsubscribeFromResourceRequestParams, but it seems identical to
@@ -2750,30 +2564,24 @@ class McpUnsubscribeRequestParams : McpRequestParams {
 
 # Base capability class (conceptual)
 class McpCapabilityBase {
-  # [JsonPropertyName("listChanged")] # Serialization hint (Common property)
   [Nullable[bool]] $ListChanged # For roots, prompts, resources, tools
 }
 
 class McpRootsCapability : McpCapabilityBase {
-  # [JsonPropertyName("listChanged")]
-  # [bool] $ListChanged # Inherited conceptually
-
-  # Handler function (represented as scriptblock)
-  # [JsonIgnore] # Serialization hint
   [Nullable[scriptblock]] $RootsHandler # Func<ListRootsRequestParams?, CancellationToken, Task<ListRootsResult>>
 }
 
 class McpSamplingCapability {
   # Empty in spec currently
   # Handler function
-  # [JsonIgnore] # Serialization hint
+
   [Nullable[scriptblock]] $SamplingHandler # Func<CreateMessageRequestParams?, CancellationToken, Task<CreateMessageResult>>
 }
 
 class McpClientCapabilities {
   # [JsonPropertyName("experimental")] # Serialization hint
   [Nullable[Dictionary[string, object]]] $Experimental
-  # [JsonPropertyName("roots")] # Serialization hint
+
   [Nullable[McpRootsCapability]] $Roots
   # [JsonPropertyName("sampling")] # Serialization hint
   [Nullable[McpSamplingCapability]] $Sampling
@@ -2782,65 +2590,49 @@ class McpClientCapabilities {
 class McpLoggingCapability {
   # Empty in spec currently
   # Handler function
-  # [JsonIgnore] # Serialization hint
+
   [Nullable[scriptblock]] $SetLoggingLevelHandler # Func<RequestContext<SetLevelRequestParams>, CancellationToken, Task<EmptyResult>>
 }
 
 class McpPromptsCapability : McpCapabilityBase {
-  # [JsonPropertyName("listChanged")]
-  # [bool] $ListChanged # Inherited conceptually
 
-  # Handlers
-  # [JsonIgnore] # Serialization hint
   [Nullable[scriptblock]] $ListPromptsHandler # Func<RequestContext<ListPromptsRequestParams>, CancellationToken, Task<ListPromptsResult>>
-  # [JsonIgnore] # Serialization hint
+
   [Nullable[scriptblock]] $GetPromptHandler # Func<RequestContext<GetPromptRequestParams>, CancellationToken, Task<GetPromptResult>>
 }
 
 class McpResourcesCapability : McpCapabilityBase {
-  # [JsonPropertyName("subscribe")] # Serialization hint
   [Nullable[bool]] $Subscribe
-  # [JsonPropertyName("listChanged")]
-  # [bool] $ListChanged # Inherited conceptually
 
-  # Handlers
-  # [JsonIgnore] # Serialization hint
+
+
   [Nullable[scriptblock]] $ListResourceTemplatesHandler # Func<RequestContext<ListResourceTemplatesRequestParams>, CancellationToken, Task<ListResourceTemplatesResult>>
-  # [JsonIgnore] # Serialization hint
+
   [Nullable[scriptblock]] $ListResourcesHandler # Func<RequestContext<ListResourcesRequestParams>, CancellationToken, Task<ListResourcesResult>>
-  # [JsonIgnore] # Serialization hint
+
   [Nullable[scriptblock]] $ReadResourceHandler # Func<RequestContext<ReadResourceRequestParams>, CancellationToken, Task<ReadResourceResult>>
-  # [JsonIgnore] # Serialization hint
+
   [Nullable[scriptblock]] $SubscribeToResourcesHandler # Func<RequestContext<SubscribeRequestParams>, CancellationToken, Task<EmptyResult>>
-  # [JsonIgnore] # Serialization hint
+
   [Nullable[scriptblock]] $UnsubscribeFromResourcesHandler # Func<RequestContext<UnsubscribeRequestParams>, CancellationToken, Task<EmptyResult>>
 }
 
 class McpToolsCapability : McpCapabilityBase {
-  # [JsonPropertyName("listChanged")]
-  # [bool] $ListChanged # Inherited conceptually
 
-  # Handlers
-  # [JsonIgnore] # Serialization hint
   [Nullable[scriptblock]] $ListToolsHandler # Func<RequestContext<ListToolsRequestParams>, CancellationToken, Task<ListToolsResult>>
-  # [JsonIgnore] # Serialization hint
+
   [Nullable[scriptblock]] $CallToolHandler # Func<RequestContext<CallToolRequestParams>, CancellationToken, Task<CallToolResponse>>
 
   # Collection of tools (managed separately in PowerShell context)
-  # [JsonIgnore] # Serialization hint
+
   [Nullable[McpServerToolCollection]] $ToolCollection
 }
 
 class McpServerCapabilities {
-  # [JsonPropertyName("experimental")] # Serialization hint
   [Nullable[Dictionary[string, object]]] $Experimental
-  # [JsonPropertyName("logging")] # Serialization hint
   [Nullable[McpLoggingCapability]] $Logging
-  # [JsonPropertyName("prompts")] # Serialization hint
   [Nullable[McpPromptsCapability]] $Prompts
-  # [JsonPropertyName("resources")] # Serialization hint
   [Nullable[McpResourcesCapability]] $Resources
-  # [JsonPropertyName("tools")] # Serialization hint
   [Nullable[McpToolsCapability]] $Tools
 }
 
@@ -2848,7 +2640,7 @@ class McpServerCapabilities {
 
 # Represents the duplex stream after connection/acceptance
 # Needs actual implementation using Streams/Pipes/Http etc.
-class McpITransport : IDisposable {
+class McpTransport : IDisposable {
   # Implement IDisposable for cleanup
   [bool] $IsConnected # { get; }
   # ChannelReader<IJsonRpcMessage> MessageReader # { get; } # Use a BlockingCollection or Channel for PS
@@ -2868,7 +2660,7 @@ class McpITransport : IDisposable {
 
   # Helper for derived classes to add received messages
   hidden ReceiveMessage([McpIJsonRpcMessage]$message) {
-    if (-not $this.MessageReaderQueue.IsAddingCompleted) {
+    if (!$this.MessageReaderQueue.IsAddingCompleted) {
       try {
         $this.MessageReaderQueue.Add($message)
       } catch [InvalidOperationException] {
@@ -2880,7 +2672,7 @@ class McpITransport : IDisposable {
 
   # Helper to signal completion
   hidden CompleteAddingMessages() {
-    if (-not $this.MessageReaderQueue.IsAddingCompleted) {
+    if (!$this.MessageReaderQueue.IsAddingCompleted) {
       $this.MessageReaderQueue.CompleteAdding()
     }
   }
@@ -2888,10 +2680,10 @@ class McpITransport : IDisposable {
 
 # Establishes a client connection
 # Needs actual implementation
-class McpIClientTransport : IDisposable {
+class McpClientTransport : IDisposable {
   # Implement IDisposable for cleanup
   # Abstract method
-  [Task[McpITransport]] ConnectAsync([CancellationToken]$cancellationToken) {
+  [Task[McpTransport]] ConnectAsync([CancellationToken]$cancellationToken) {
     throw [NotImplementedException]::new("ConnectAsync must be implemented by derived client transport class.")
   }
   [Task] DisposeAsync() {
@@ -2909,7 +2701,7 @@ class McpIClientTransport : IDisposable {
 class McpIServerTransport : IDisposable {
   # Implement IDisposable for cleanup
   # Abstract method
-  [Task[McpITransport]] AcceptAsync([CancellationToken]$cancellationToken) {
+  [Task[McpTransport]] AcceptAsync([CancellationToken]$cancellationToken) {
     throw [NotImplementedException]::new("AcceptAsync must be implemented by derived server transport class.")
   }
   [Task] DisposeAsync() {
@@ -2930,7 +2722,7 @@ class McpTransportException : Exception {
   McpTransportException([string]$message, [Exception]$innerException) : base($message, $innerException) {}
 }
 
-class McpTransportBase : McpITransport {
+class McpTransportBase : McpTransport {
   [bool]$IsConnected = $false
   [BlockingCollection[McpIJsonRpcMessage]]$MessageReaderQueue = [BlockingCollection[McpIJsonRpcMessage]]::new()
   [ILogger]$Logger
@@ -2942,7 +2734,7 @@ class McpTransportBase : McpITransport {
   # SendMessageAsync and DisposeAsync remain abstract essentially
   [Task] SendMessageAsync([McpIJsonRpcMessage]$message, [CancellationToken]$cancellationToken) {
     # Base implementation could check IsConnected, but actual sending logic is transport specific
-    if (-not $this.IsConnected) {
+    if (!$this.IsConnected) {
       $this.Logger.LogWarning("Transport not connected, cannot send message.") # Example log
       throw [McpTransportException]::new("Transport is not connected")
     }
@@ -2952,7 +2744,7 @@ class McpTransportBase : McpITransport {
   [Task] DisposeAsync() {
     $this.SetConnected($false)
     $this.CompleteAddingMessages()
-    $this.MessageReaderQueue?.Dispose()
+    $this.MessageReaderQueue.Dispose()
     # Base cleanup, specific transports might need more
     return [Task]::CompletedTask
   }
@@ -2961,7 +2753,7 @@ class McpTransportBase : McpITransport {
   hidden SetConnected([bool]$isConnected) {
     if ($this.IsConnected -ne $isConnected) {
       $this.IsConnected = $isConnected
-      if (-not $isConnected) {
+      if (!$isConnected) {
         $this.CompleteAddingMessages()
       }
     }
@@ -2969,7 +2761,7 @@ class McpTransportBase : McpITransport {
 
   hidden [Task] WriteMessageAsync([McpIJsonRpcMessage]$message, [CancellationToken]$cancellationToken) {
     # Simplified: just adds to the queue
-    if (-not $this.IsConnected) { throw [McpTransportException]::new("Transport is not connected") }
+    if (!$this.IsConnected) { throw [McpTransportException]::new("Transport is not connected") }
 
     if ($this.MessageReaderQueue.IsAddingCompleted) {
       $this.Logger.LogWarning("Attempted to write message to completed queue for endpoint.")
@@ -2992,9 +2784,9 @@ class McpTransportBase : McpITransport {
 
 # --- Forward Declare Server Config for Factory ---
 class McpServerConfig {
-  [string] $Id # required, Unique identifier for this server configuration.
-  [string] $Name # required, Display name for the server.
-  [McpTransportTypes] $TransportType # required
+  [ValidateNotNullOrEmpty()][string] $Id # required, Unique identifier for this server configuration.
+  [ValidateNotNullOrEmpty()][string] $Name # required, Display name for the server.
+  [ValidateNotNullOrEmpty()][McpTransportTypes] $TransportType # required
   [Nullable[string]] $Location # Path for stdio, URL for http/sse
   [Nullable[string[]]] $Arguments # Used by stdio
   [Nullable[Dictionary[string, string]]] $TransportOptions # Transport-specific key-value pairs
@@ -3004,7 +2796,7 @@ class McpServerConfig {
 # --- Stdio Transport ---
 
 class McpStdioClientTransportOptions {
-  [string] $Command # required
+  [ValidateNotNullOrEmpty()][string] $Command # required
   [Nullable[string]] $Arguments
   [Nullable[string]] $WorkingDirectory
   [Nullable[Dictionary[string, string]]] $EnvironmentVariables
@@ -3053,7 +2845,7 @@ class McpStdioClientStreamTransport : McpTransportBase {
         StandardErrorEncoding  = [UTF8Encoding]::new($false)  # No BOM
         # StandardInputEncoding requires .NET Core or specific handling
       }
-      if (-not [string]::IsNullOrWhiteSpace($this._options.Arguments)) {
+      if (![string]::IsNullOrWhiteSpace($this._options.Arguments)) {
         $startInfo.Arguments = $this._options.Arguments
       }
       if ($this._options.EnvironmentVariables) {
@@ -3076,7 +2868,7 @@ class McpStdioClientStreamTransport : McpTransportBase {
       $this.Logger.LogInformation("Starting process: $($startInfo.FileName) $($startInfo.Arguments)")
       $this._processStarted = $this._process.Start()
 
-      if (-not $this._processStarted) {
+      if (!$this._processStarted) {
         throw [McpTransportException]::new("Failed to start MCP server process")
       }
       $this.Logger.LogInformation("Process started with PID: $($this._process.Id)")
@@ -3106,7 +2898,7 @@ class McpStdioClientStreamTransport : McpTransportBase {
     $this.Logger.LogTrace("Starting Stdio read loop...")
     try {
       $reader = $this._process.StandardOutput
-      while (-not $cancellationToken.IsCancellationRequested -and $null -ne $this._process -and (-not $this._process.HasExited)) {
+      while (!$cancellationToken.IsCancellationRequested -and $null -ne $this._process -and (!$this._process.HasExited)) {
         # Use ReadLineAsync with cancellation support if available (.NET Core specific?)
         # Fallback to synchronous ReadLine with periodic cancellation check
         $line = $null
@@ -3162,7 +2954,7 @@ class McpStdioClientStreamTransport : McpTransportBase {
   # Override SendMessageAsync for Stdio specific implementation
   [Task] SendMessageAsync([McpIJsonRpcMessage]$message, [CancellationToken]$cancellationToken) {
     #region SendMessageAsync Override
-    if (-not $this.IsConnected -or $null -eq $this._process -or $this._process.HasExited) {
+    if (!$this.IsConnected -or $null -eq $this._process -or $this._process.HasExited) {
       throw [McpTransportException]::new("Transport is not connected or process has exited")
     }
 
@@ -3194,7 +2986,6 @@ class McpStdioClientStreamTransport : McpTransportBase {
             $tcs.SetResult($true)
           }
         }, $cancellationToken)
-
     } catch {
       $this.Logger.LogError("Failed to initiate send message via Stdio: $($_.Exception.Message)")
       $tcs.SetException($_.Exception)
@@ -3210,7 +3001,7 @@ class McpStdioClientStreamTransport : McpTransportBase {
     $this.SetConnected($false) # Mark as disconnected immediately
 
     # Cancel the read loop and internal operations
-    if ($this._shutdownCts -ne $null -and -not $this._shutdownCts.IsCancellationRequested) {
+    if ($null -ne $this._shutdownCts -and !$this._shutdownCts.IsCancellationRequested) {
       try { $this._shutdownCts.Cancel() } catch {
         $null
       }
@@ -3224,7 +3015,7 @@ class McpStdioClientStreamTransport : McpTransportBase {
     $this._readTask = $null
 
     # Process cleanup
-    if ($processToCleanup -ne $null -and $this._processStarted -and (-not $processToCleanup.HasExited)) {
+    if ($null -ne $processToCleanup -and $this._processStarted -and (!$processToCleanup.HasExited)) {
       $this.Logger.LogInformation("Attempting to kill process tree for PID: $($processToCleanup.Id)")
       try {
         # Using simplified Kill() - C# uses KillTree helper which needs porting
@@ -3247,7 +3038,7 @@ class McpStdioClientStreamTransport : McpTransportBase {
     }
 
     # Wait for read task to complete (with timeout)
-    if ($null -ne $readTaskToWait -and -not $readTaskToWait.IsCompleted) {
+    if ($null -ne $readTaskToWait -and !$readTaskToWait.IsCompleted) {
       $this.Logger.LogTrace("Waiting for read task to complete...")
       try {
         # Task.Wait(TimeSpan, CancellationToken) doesn't exist directly in older .NET
@@ -3269,7 +3060,7 @@ class McpStdioClientStreamTransport : McpTransportBase {
     }
 
     # Dispose CancellationTokenSource
-    try { $this._shutdownCts?.Dispose() } catch {
+    try { $this._shutdownCts.Dispose() } catch {
       $null
     }
     $this._shutdownCts = $null
@@ -3285,7 +3076,7 @@ class McpStdioClientStreamTransport : McpTransportBase {
   }
 }
 
-class McpStdioClientTransport : McpIClientTransport {
+class McpStdioClientTransport : McpClientTransport {
   hidden [McpStdioClientTransportOptions] $_options
   hidden [McpServerConfig] $_serverConfig
   hidden [ILoggerFactory] $_loggerFactory
@@ -3298,13 +3089,13 @@ class McpStdioClientTransport : McpIClientTransport {
     $this._loggerFactory = $loggerFactory
   }
 
-  [Task[McpITransport]] ConnectAsync([CancellationToken]$cancellationToken) {
+  [Task[McpTransport]] ConnectAsync([CancellationToken]$cancellationToken) {
     $streamTransport = [McpStdioClientStreamTransport]::new($this._options, $this._serverConfig, $this._loggerFactory)
     $connectTask = $streamTransport.ConnectAsync($cancellationToken)
 
     # Return a task that completes with the transport instance or throws if connection fails
     return $connectTask.ContinueWith(
-      [Func[Task, McpITransport]] {
+      [Func[Task, McpTransport]] {
         param($task)
         if ($task.IsFaulted) {
           # Ensure disposal if connection failed
@@ -3366,7 +3157,7 @@ class McpStdioServerTransport : McpTransportBase {
   hidden ReadMessagesLoop([CancellationToken]$cancellationToken) {
     $this.Logger.LogTrace("Starting Stdio Server read loop...")
     try {
-      while (-not $cancellationToken.IsCancellationRequested) {
+      while (!$cancellationToken.IsCancellationRequested) {
         $line = $null
         # Asynchronously read line with cancellation
         $readTask = $this._stdInReader.ReadLineAsync() # .NET Core has ReadLineAsync(CancellationToken)
@@ -3421,7 +3212,7 @@ class McpStdioServerTransport : McpTransportBase {
       $this._sendLock.Wait($cancellationToken)
       $lockTaken = $true
 
-      if (-not $this.IsConnected) { throw [McpTransportException]::new("Transport is not connected") }
+      if (!$this.IsConnected) { throw [McpTransportException]::new("Transport is not connected") }
 
       $id = if ($message -is [McpIJsonRpcMessageWithId]) { $message.Id.ToString() } else { "(no id)" }
       $this.Logger.LogTrace("Server sending message (ID: $id)")
@@ -3478,12 +3269,12 @@ class McpStdioServerTransport : McpTransportBase {
       }
 
       # Dispose streams (this might interrupt blocking reads/writes)
-      try { $this._stdInReader?.Dispose() } catch { $this.Logger.LogWarning("Exception disposing stdinReader: $($_.Exception.Message)") }
-      try { $this._stdOutStream?.Dispose() } catch { $this.Logger.LogWarning("Exception disposing stdoutStream: $($_.Exception.Message)") }
+      try { $this._stdInReader.Dispose() } catch { $this.Logger.LogWarning("Exception disposing stdinReader: $($_.Exception.Message)") }
+      try { $this._stdOutStream.Dispose() } catch { $this.Logger.LogWarning("Exception disposing stdoutStream: $($_.Exception.Message)") }
 
       # Wait for read loop task
       $readLoopTask = $this._readLoopCompleted
-      if ($null -ne $readLoopTask -and -not $readLoopTask.IsCompleted) {
+      if ($null -ne $readLoopTask -and !$readLoopTask.IsCompleted) {
         $this.Logger.LogTrace("Waiting for server read loop to complete...")
         try {
           $readLoopTask.Wait([TimeSpan]::FromSeconds(5)) # Short timeout
@@ -3501,10 +3292,10 @@ class McpStdioServerTransport : McpTransportBase {
       }
 
       # Dispose Cts and Lock
-      try { $this._shutdownCts?.Dispose() } catch {
+      try { $this._shutdownCts.Dispose() } catch {
         $null
       }
-      try { $this._sendLock?.Dispose() } catch {
+      try { $this._sendLock.Dispose() } catch {
         $null
       }
 
@@ -3521,7 +3312,7 @@ class McpStdioServerTransport : McpTransportBase {
 }
 
 
-# --- SSE Transport (Placeholders) ---
+# --- SSE Transport  ---
 
 class McpSseClientTransportOptions {
   [TimeSpan] $ConnectionTimeout = [TimeSpan]::FromSeconds(30)
@@ -3585,7 +3376,7 @@ class McpSseClientSessionTransport : McpTransportBase {
     #region SSE Receive Loop Placeholder
     $this.Logger.LogTrace("Starting SSE receive loop...")
     $reconnectAttempts = 0
-    while (-not $cancellationToken.IsCancellationRequested) {
+    while (!$cancellationToken.IsCancellationRequested) {
       try {
         $this.Logger.LogTrace("Attempting SSE connection to $($this._sseEndpoint)...")
         # --- HttpClient Request for SSE stream ---
@@ -3616,11 +3407,11 @@ class McpSseClientSessionTransport : McpTransportBase {
         # Placeholder logic:
         $reader = [StreamReader]::new($stream, [Encoding]::UTF8)
         $eventType = "message" # Default SSE event type
-        while (-not $reader.EndOfStream) {
+        while (!$reader.EndOfStream) {
           # Simplified blocking read - needs async and proper SSE parsing
           if ($cancellationToken.IsCancellationRequested) { break }
           $line = $reader.ReadLine() # Blocking read
-          if ($line -eq $null) { break } # Check for EOF again
+          if ($null -eq $line) { break } # Check for EOF again
 
           $this.Logger.LogTrace("SSE Raw Line: $line")
           # Parse $line according to SSE format (event:, data:, id:, retry:, comments)
@@ -3687,13 +3478,13 @@ class McpSseClientSessionTransport : McpTransportBase {
     } catch {
       $this.Logger.LogError("Failed to handle endpoint event: $($_.Exception.Message)")
       $this._connectionEstablishedTcs.TrySetException($_) # Signal failure
-      $this._connectionCts?.Cancel() # Stop the connection attempt
+      $this._connectionCts.Cancel() # Stop the connection attempt
     }
   }
 
   hidden [Task] ProcessSseMessage([string]$data, [CancellationToken]$cancellationToken) {
     $tcs = [TaskCompletionSource[bool]]::new()
-    if (-not $this.IsConnected) {
+    if (!$this.IsConnected) {
       $this.Logger.LogWarning("Received SSE message before transport is fully connected/endpoint known.")
       $tcs.SetResult($true) # Or potentially error? C# logs warning and returns.
       return $tcs.Task
@@ -3718,7 +3509,7 @@ class McpSseClientSessionTransport : McpTransportBase {
   # Override SendMessageAsync for SSE specific implementation (POST to message endpoint)
   [Task] SendMessageAsync([McpIJsonRpcMessage]$message, [CancellationToken]$cancellationToken) {
     #region SSE SendMessageAsync Override
-    if (-not $this.IsConnected -or $null -eq $this._messageEndpoint) {
+    if (!$this.IsConnected -or $null -eq $this._messageEndpoint) {
       throw [McpTransportException]::new("Transport not connected or message endpoint not discovered")
     }
 
@@ -3777,7 +3568,7 @@ class McpSseClientSessionTransport : McpTransportBase {
   [Task] CleanupAsync([CancellationToken]$cancellationToken) {
     $this.Logger.LogInformation("Cleaning up SSE transport...")
     $this.SetConnected($false)
-    if ($null -ne $this._connectionCts -and -not $this._connectionCts.IsCancellationRequested) {
+    if ($null -ne $this._connectionCts -and !$this._connectionCts.IsCancellationRequested) {
       try { $this._connectionCts.Cancel() } catch {
         $null
       }
@@ -3786,7 +3577,7 @@ class McpSseClientSessionTransport : McpTransportBase {
     $this._receiveTask = $null
 
     # Wait for receive task
-    if ($null -ne $receiveTaskToWait -and -not $receiveTaskToWait.IsCompleted) {
+    if ($null -ne $receiveTaskToWait -and !$receiveTaskToWait.IsCompleted) {
       $this.Logger.LogTrace("Waiting for SSE receive task to complete...")
       try {
         $receiveTaskToWait.Wait([TimeSpan]::FromSeconds(5)) # Simple timeout wait
@@ -3803,7 +3594,7 @@ class McpSseClientSessionTransport : McpTransportBase {
       }
     }
 
-    try { $this._connectionCts?.Dispose() } catch {
+    try { $this._connectionCts.Dispose() } catch {
       $null
     }
     $this._connectionCts = $null
@@ -3819,7 +3610,7 @@ class McpSseClientSessionTransport : McpTransportBase {
   }
 }
 
-class McpSseClientTransport : McpIClientTransport {
+class McpSseClientTransport : McpClientTransport {
   hidden [McpSseClientTransportOptions] $_options
   hidden [McpServerConfig] $_serverConfig
   hidden [HttpClient] $_httpClient
@@ -3842,12 +3633,12 @@ class McpSseClientTransport : McpIClientTransport {
     $this._ownsHttpClient = $ownsHttpClient
   }
 
-  [Task[McpITransport]] ConnectAsync([CancellationToken]$cancellationToken) {
+  [Task[McpTransport]] ConnectAsync([CancellationToken]$cancellationToken) {
     $sessionTransport = [McpSseClientSessionTransport]::new($this._options, $this._serverConfig, $this._httpClient, $this._loggerFactory)
     $connectTask = $sessionTransport.ConnectAsync($cancellationToken)
 
     return $connectTask.ContinueWith(
-      [Func[Task, McpITransport]] {
+      [Func[Task, McpTransport]] {
         param($task)
         if ($task.IsFaulted) {
           try { $sessionTransport.DisposeAsync().Wait(1000) } catch {
@@ -3868,7 +3659,7 @@ class McpSseClientTransport : McpIClientTransport {
 
   [Task] DisposeAsync() {
     if ($this._ownsHttpClient) {
-      try { $this._httpClient?.Dispose() } catch {
+      try { $this._httpClient.Dispose() } catch {
         $null
       }
     }
@@ -3930,7 +3721,7 @@ class McpHttpListenerSseServerSessionTransport : McpTransportBase {
     try {
       $this._sendLock.Wait($cancellationToken)
       $lockTaken = $true
-      if (-not $this.IsConnected) { throw [McpTransportException]::new("Transport session is not connected") }
+      if (!$this.IsConnected) { throw [McpTransportException]::new("Transport session is not connected") }
 
       $sb = [StringBuilder]::new()
       $sb.AppendLine("event: $eventType")
@@ -3979,16 +3770,16 @@ class McpHttpListenerSseServerSessionTransport : McpTransportBase {
     if ([Interlocked]::Exchange([ref]$this._disposed, 1) -ne 0) { return [Task]::CompletedTask }
 
     $this.SetConnected($false)
-    try { $this._sessionCts?.Cancel() } catch {
+    try { $this._sessionCts.Cancel() } catch {
       $null
     }
 
     # Don't close the _responseStream here, the HttpListener context owner should do that.
     # Dispose semaphore and CTS
-    try { $this._sendLock?.Dispose() } catch {
+    try { $this._sendLock.Dispose() } catch {
       $null
     }
-    try { $this._sessionCts?.Dispose() } catch {
+    try { $this._sessionCts.Dispose() } catch {
       $null
     }
 
@@ -4006,7 +3797,7 @@ class McpHttpListenerSseServerTransport : McpIServerTransport {
   hidden [ILogger] $_logger
   hidden [CancellationTokenSource] $_serverShutdownCts
   hidden [Task] $_listenTask
-  hidden [BlockingCollection[McpITransport]] $_incomingSessions # Queue for accepted sessions
+  hidden [BlockingCollection[McpTransport]] $_incomingSessions # Queue for accepted sessions
   hidden [McpHttpListenerSseServerSessionTransport] $_currentSession # Single session support initially
 
   McpHttpListenerSseServerTransport([McpServerOptions]$serverOptions, [int]$port, [ILoggerFactory]$loggerFactory) : base($serverOptions.ServerInfo.Name, $port, $loggerFactory) {
@@ -4020,7 +3811,7 @@ class McpHttpListenerSseServerTransport : McpIServerTransport {
     $this._loggerFactory = $loggerFactory
     $this._logger = if ($loggerFactory) { $loggerFactory.CreateLogger($this.GetType().Name) } else { [NullLogger]::Instance }
     $this._serverShutdownCts = [CancellationTokenSource]::new()
-    $this._incomingSessions = [BlockingCollection[McpITransport]]::new(1) # Bounded to 1 for single session start
+    $this._incomingSessions = [BlockingCollection[McpTransport]]::new(1) # Bounded to 1 for single session start
 
     $this._listener = [HttpListener]::new()
     $prefix = "http://localhost:$($this._port)/" # Needs config for hostname/prefix
@@ -4035,7 +3826,7 @@ class McpHttpListenerSseServerTransport : McpIServerTransport {
 
   hidden ListenLoop([CancellationToken]$cancellationToken) {
     $this._logger.LogInformation("HttpListener entering listen loop...")
-    while (-not $cancellationToken.IsCancellationRequested -and $this._listener.IsListening) {
+    while (!$cancellationToken.IsCancellationRequested -and $this._listener.IsListening) {
       try {
         # Async get context
         $contextTask = $this._listener.GetContextAsync()
@@ -4096,7 +3887,7 @@ class McpHttpListenerSseServerTransport : McpIServerTransport {
     } catch {
       $this.Logger.LogError("Error processing request $($request.Url): $($_.Exception.Message)")
       try {
-        if (-not $response.HeadersSent) { $response.StatusCode = [HttpStatusCode]::InternalServerError }
+        if (!$response.HeadersSent) { $response.StatusCode = [HttpStatusCode]::InternalServerError }
         $response.Close()
       } catch {
         $null
@@ -4112,7 +3903,7 @@ class McpHttpListenerSseServerTransport : McpIServerTransport {
     try {
       # Dispose previous session if any (single session logic)
       $oldSession = $this._currentSession
-      if ($oldSession -ne $null) {
+      if ($null -ne $oldSession) {
         $this.Logger.LogWarning("New SSE connection replacing existing session.")
         try { $oldSession.DisposeAsync().Wait(1000) } catch {
           $null
@@ -4138,7 +3929,7 @@ class McpHttpListenerSseServerTransport : McpIServerTransport {
       $sessionTransport.SendEndpointEventAsync("/message").GetAwaiter().GetResult() # Path needs config
 
       # Add session to the queue for AcceptAsync
-      if (-not $this._incomingSessions.TryAdd($sessionTransport, [TimeSpan]::FromSeconds(1), $cancellationToken)) {
+      if (!$this._incomingSessions.TryAdd($sessionTransport, [TimeSpan]::FromSeconds(1), $cancellationToken)) {
         $this.Logger.LogError("Failed to add new SSE session to acceptance queue (queue full or cancelled).")
         try { $sessionTransport.DisposeAsync().Wait(500) } catch {
           $null
@@ -4179,7 +3970,7 @@ class McpHttpListenerSseServerTransport : McpIServerTransport {
     $tcs = [TaskCompletionSource[bool]]::new()
 
     try {
-      if ($null -eq $this._currentSession -or -not $this._currentSession.IsConnected) {
+      if ($null -eq $this._currentSession -or !$this._currentSession.IsConnected) {
         $this.Logger.LogWarning("Received POST message but no active SSE session.")
         $response.StatusCode = [HttpStatusCode]::BadRequest # Or ServiceUnavailable?
         $response.Close()
@@ -4219,7 +4010,7 @@ class McpHttpListenerSseServerTransport : McpIServerTransport {
     } catch {
       $this.Logger.LogError("Error handling POST message: $($_.Exception.Message)")
       try {
-        if (-not $response.HeadersSent) { $response.StatusCode = [HttpStatusCode]::InternalServerError }
+        if (!$response.HeadersSent) { $response.StatusCode = [HttpStatusCode]::InternalServerError }
         $response.Close()
       } catch {
         $null
@@ -4229,9 +4020,9 @@ class McpHttpListenerSseServerTransport : McpIServerTransport {
     return $tcs.Task
   }
 
-  [Task[McpITransport]] AcceptAsync([CancellationToken]$cancellationToken) {
+  [Task[McpTransport]] AcceptAsync([CancellationToken]$cancellationToken) {
     # Take one session from the queue
-    $tcs = [TaskCompletionSource[McpITransport]]::new()
+    $tcs = [TaskCompletionSource[McpTransport]]::new()
     try {
       $this.Logger.LogInformation("Waiting to accept incoming transport session...")
       # Take will block until an item is available or collection is completed/cancelled
@@ -4267,7 +4058,7 @@ class McpHttpListenerSseServerTransport : McpIServerTransport {
     #region SSE Server Dispose
     $this.Logger.LogInformation("Disposing HttpListener SSE Server transport...")
     # Signal shutdown
-    try { $this._serverShutdownCts?.Cancel() } catch {
+    try { $this._serverShutdownCts.Cancel() } catch {
       $null
     }
 
@@ -4282,7 +4073,7 @@ class McpHttpListenerSseServerTransport : McpIServerTransport {
 
     # Wait for listen task
     $listenTaskToWait = $this._listenTask
-    if ($null -ne $listenTaskToWait -and -not $listenTaskToWait.IsCompleted) {
+    if ($null -ne $listenTaskToWait -and !$listenTaskToWait.IsCompleted) {
       $this.Logger.LogTrace("Waiting for listener task to complete...")
       try {
         $listenTaskToWait.Wait([TimeSpan]::FromSeconds(5))
@@ -4302,10 +4093,10 @@ class McpHttpListenerSseServerTransport : McpIServerTransport {
     }
 
     # Dispose queue and CTS
-    try { $this._incomingSessions?.Dispose() } catch {
+    try { $this._incomingSessions.Dispose() } catch {
       $null
     }
-    try { $this._serverShutdownCts?.Dispose() } catch {
+    try { $this._serverShutdownCts.Dispose() } catch {
       $null
     }
 
@@ -4324,7 +4115,7 @@ class McpRequestHandlers : Dictionary[string, scriptblock] {
   # Example: $Params = [JsonSerializer]::Deserialize($Request.Params, [McpMyRequestParams], $JsonOptions)
   [void] Set([string]$method, [scriptblock]$handler) {
     if ([string]::IsNullOrWhiteSpace($method)) { throw [ArgumentNullException]::new('method') }
-    if ($handler -eq $null) { throw [ArgumentNullException]::new('handler') }
+    if ($null -eq $handler) { throw [ArgumentNullException]::new('handler') }
     $this[$method] = $handler
   }
 }
@@ -4335,7 +4126,7 @@ class McpNotificationHandlers : Dictionary[string, List[scriptblock]] {
     if ([string]::IsNullOrWhiteSpace($method)) { throw [ArgumentNullException]::new('method') }
     if ($null -eq $handler) { throw [ArgumentNullException]::new('handler') }
 
-    if (-not $this.ContainsKey($method)) {
+    if (!$this.ContainsKey($method)) {
       $this[$method] = [List[scriptblock]]::new()
     }
     # Need locking if accessed concurrently? PowerShell dictionaries aren't thread-safe.
@@ -4386,8 +4177,8 @@ class McpJsonRpcEndpoint : IDisposable {
     return $this.GetSessionOrThrow().SendMessageAsync($message, $cancellationToken)
   }
 
-  hidden InitializeSession([McpITransport]$sessionTransport) {
-    if ($this._session -ne $null) {
+  hidden InitializeSession([McpTransport]$sessionTransport) {
+    if ($null -ne $this._session) {
       $this.Logger.LogWarning("Session already initialized for $($this.EndpointName)")
       return # Or throw? C# allows re-init? No, seems it shouldn't.
     }
@@ -4412,7 +4203,7 @@ class McpJsonRpcEndpoint : IDisposable {
   }
 
   hidden [McpSession] GetSessionOrThrow() {
-    if ($this._session -eq $null) {
+    if ($null -eq $this._session) {
       throw [InvalidOperationException]::new("Session has not been initialized. Call InitializeSession.")
     }
     return $this._session
@@ -4453,7 +4244,7 @@ class McpJsonRpcEndpoint : IDisposable {
     $this.Logger.LogInformation("Cleaning up endpoint $($this.EndpointName)...")
 
     # Cancel session processing
-    if ($this._sessionCts -ne $null -and -not $this._sessionCts.IsCancellationRequested) {
+    if ($null -ne $this._sessionCts -and !$this._sessionCts.IsCancellationRequestened) {
       try { $this._sessionCts.Cancel() } catch {
         $null
       }
@@ -4461,7 +4252,7 @@ class McpJsonRpcEndpoint : IDisposable {
 
     # Wait for message processing task to finish
     $processingTask = $this._messageProcessingTask
-    if ($processingTask -ne $null -and -not $processingTask.IsCompleted) {
+    if ($null -ne $processingTask -and !$processingTask.IsCompleted) {
       $this.Logger.LogTrace("Waiting for message processing task to complete...")
       try {
         $processingTask.Wait([TimeSpan]::FromSeconds(5)) # Wait with timeout
@@ -4473,12 +4264,12 @@ class McpJsonRpcEndpoint : IDisposable {
     }
 
     # Dispose session (which cancels pending requests)
-    try { $this._session?.Dispose() } catch {
+    try { $this._session.Dispose() } catch {
       $null
     }
 
     # Dispose CTS
-    try { $this._sessionCts?.Dispose() } catch {
+    try { $this._sessionCts.Dispose() } catch {
       $null
     }
 
@@ -4497,7 +4288,6 @@ class McpJsonRpcEndpoint : IDisposable {
 
 class McpClientException : Exception {
   [Nullable[int]] $ErrorCode
-
   McpClientException() : base() {}
   McpClientException([string]$message) : base($message) {}
   McpClientException([string]$message, [int]$errorCode) : base($message) { $this.ErrorCode = $errorCode }
@@ -4511,7 +4301,7 @@ class McpClientOptions {
   [TimeSpan] $InitializationTimeout = [TimeSpan]::FromSeconds(60)
 
   # Information about this client implementation.
-  [McpImplementation] $ClientInfo # required
+  [ValidateNotNullOrEmpty()][McpImplementation] $ClientInfo # required
   # Client capabilities to advertise.
   [Nullable[McpClientCapabilities]] $Capabilities
 }
@@ -4547,11 +4337,10 @@ class McpClientTool {
 class McpClient : McpJsonRpcEndpoint {
   [string]$Name
   [guid]$Id = [guid]::NewGuid()
-  # Implements McpIClient concept
-  hidden [McpIClientTransport] $_clientTransport # Owns this potentially
+  hidden [McpClientTransport] $_clientTransport # Owns this potentially
   hidden [McpClientOptions] $_options
   hidden [McpServerConfig] $_serverConfig # Info about server connecting to
-  hidden [McpITransport] $_sessionTransport # Session-specific transport from ConnectAsync
+  hidden [McpTransport] $_sessionTransport # Session-specific transport from ConnectAsync
   hidden [CancellationTokenSource] $_connectCts # For cancelling connection phase
 
   # Public properties matching McpIClient
@@ -4563,7 +4352,7 @@ class McpClient : McpJsonRpcEndpoint {
   [string] $EndpointName = "MCP Client (Uninitialized)" # Default value
 
   McpClient(
-    [McpIClientTransport]$clientTransport,
+    [McpClientTransport]$clientTransport,
     [McpClientOptions]$options,
     [McpServerConfig]$serverConfig,
     [ILoggerFactory]$loggerFactory
@@ -4579,7 +4368,7 @@ class McpClient : McpJsonRpcEndpoint {
     $this.EndpointName = "Client ($($serverConfig.Id): $($serverConfig.Name))" # Initial name
 
     # --- Register Client-Side Handlers based on Options ---
-    if ($options.Capabilities?.Sampling?.SamplingHandler) {
+    if ($options.Capabilities.Sampling.SamplingHandler) {
       $handler = $options.Capabilities.Sampling.SamplingHandler
       # C# uses SetRequestHandler<CreateMessageRequestParams, CreateMessageResult>
       # PS handler needs to handle deserialization itself
@@ -4591,7 +4380,7 @@ class McpClient : McpJsonRpcEndpoint {
           return . $handler $params $ct # Assumes handler returns Task<McpCreateMessageResult> -> Task<object>
         })
     }
-    if ($options.Capabilities?.Roots?.RootsHandler) {
+    if ($options.Capabilities.Roots.RootsHandler) {
       $handler = $options.Capabilities.Roots.RootsHandler
       # C# uses SetRequestHandler<ListRootsRequestParams, ListRootsResult>
       $this.SetRequestHandler("roots/list", [scriptblock] {
@@ -4682,7 +4471,6 @@ class McpClient : McpJsonRpcEndpoint {
           } finally {
             $initTimeoutCts.Dispose()
           }
-
         } catch [Exception] {
           $this.Logger.LogError("Client connection/initialization failed: $($_.Exception.Message)")
           # Ensure cleanup if connection or init fails
@@ -4733,7 +4521,7 @@ class McpClient : McpJsonRpcEndpoint {
               $result.Tools.ForEach({ $param = $_; $allTools.Add([McpClientTool]::new($this, $param)) })
             }
             $cursor = $result.NextCursor
-          } while ($null -ne $cursor -and (-not $cancellationToken.IsCancellationRequested))
+          } while ($null -ne $cursor -and (!$cancellationToken.IsCancellationRequested))
           $tcs.SetResult($allTools)
         } catch {
           $tcs.SetException($_.Exception)
@@ -4759,7 +4547,7 @@ class McpClient : McpJsonRpcEndpoint {
           })
       }
       $cursor = $result.NextCursor
-    } while ($cursor -ne $null -and (-not $cancellationToken.IsCancellationRequested))
+    } while ($null -ne $cursor -and (!$cancellationToken.IsCancellationRequested))
   }
 
   [Task[object]] CallToolAsyncInternal([string]$toolName, [Dictionary[string, object]]$arguments, [CancellationToken]$cancellationToken) {
@@ -4790,7 +4578,7 @@ class McpClient : McpJsonRpcEndpoint {
     $this.Logger.LogInformation("Disposing Client endpoint $($this.EndpointName)...")
 
     # Cancel connection attempt if still in progress
-    if ($null -ne $this._connectCts -and -not $this._connectCts.IsCancellationRequested) {
+    if ($null -ne $this._connectCts -and !$this._connectCts.IsCancellationRequested) {
       try { $this._connectCts.Cancel() } catch {
         $null
       }
@@ -4819,7 +4607,7 @@ class McpClient : McpJsonRpcEndpoint {
     }
 
     # Dispose CTS
-    try { $this._connectCts?.Dispose() } catch {
+    try { $this._connectCts.Dispose() } catch {
       $null
     }
 
@@ -4854,13 +4642,13 @@ class McpClientFactory {
         $client = $null # Define client here for cleanup scope
         try {
           # Create Transport
-          if ($createTransportFunc -ne $null) {
+          if ($null -ne $createTransportFunc) {
             $transport = . $createTransportFunc $serverConfig $loggerFactory
-            if ($transport -eq $null) { throw [InvalidOperationException]::new("createTransportFunc returned null.") }
+            if ($null -eq $transport) { throw [InvalidOperationException]::new("createTransportFunc returned null.") }
           } else {
             $transport = [McpClientFactory]::CreateTransport($serverConfig, $loggerFactory)
           }
-          if ($transport -isnot [McpIClientTransport]) { throw [InvalidOperationException]::new("Created transport does not implement McpIClientTransport.") }
+          if ($null -eq $transport -or $transport -isnot [McpClientTransport]) { throw [InvalidOperationException]::new("Created transport does not implement McpClientTransport.") }
 
           # Create Client
           $client = [McpClient]::new($transport, $resolvedClientOptions, $serverConfig, $loggerFactory)
@@ -4873,7 +4661,7 @@ class McpClientFactory {
           } catch {
             $logger.LogError("Client connection failed during factory creation: $($_.Exception.Message)")
             # Ensure client and transport are disposed if connect fails
-            try { $client?.DisposeAsync().Wait($cancellationToken) } catch {
+            try { $client.DisposeAsync().Wait($cancellationToken) } catch {
               $null
             }
             $tcs.SetException($_.Exception) # Propagate connection exception
@@ -4910,17 +4698,17 @@ class McpClientFactory {
     }
   }
 
-  static hidden [McpIClientTransport] CreateTransport([McpServerConfig]$serverConfig, [ILoggerFactory]$loggerFactory) {
+  static hidden [McpClientTransport] CreateTransport([McpServerConfig]$serverConfig, [ILoggerFactory]$loggerFactory) {
     #region Create Transport Logic
     $transportTypeStr = try { [string]$serverConfig.TransportType } catch { '' } # Handle if not string/enum
     $logger = if ($loggerFactory) { $loggerFactory.CreateLogger("McpTransportFactory") } else { [NullLogger]::Instance }
     $logger.LogTrace("Creating transport of type '$transportTypeStr'")
 
     if ($transportTypeStr -eq [string][McpTransportTypes]::StdIo) {
-      $command = $serverConfig.TransportOptions?.command ?? $serverConfig.Location
+      $command = $serverConfig.TransportOptions.command ?? $serverConfig.Location
       if ([string]::IsNullOrWhiteSpace($command)) { throw [ArgumentException]::new("Command/Location is required for stdio transport.") }
-      $arguments = $serverConfig.TransportOptions?.arguments
-      $workingDir = $serverConfig.TransportOptions?.workingDirectory
+      $arguments = $serverConfig.TransportOptions.arguments
+      $workingDir = $serverConfig.TransportOptions.workingDirectory
       # Extract env vars correctly
       $envVars = $null
       if ($null -ne $serverConfig.TransportOptions) {
@@ -4932,7 +4720,7 @@ class McpClientFactory {
         if ($envVars.Count -eq 0) { $envVars = $null }
       }
 
-      $shutdownTimeoutStr = $serverConfig.TransportOptions?.shutdownTimeout
+      $shutdownTimeoutStr = $serverConfig.TransportOptions.shutdownTimeout
       $shutdownTimeout = [TimeSpan]::FromSeconds(5) # Default
       if ($shutdownTimeoutStr -and [TimeSpan]::TryParse($shutdownTimeoutStr, [ref]$shutdownTimeout)) {
         # Parsed successfully, $shutdownTimeout updated
@@ -4997,7 +4785,7 @@ class McpServerException : Exception {
 # Defines server options sent to client during initialization
 class McpServerOptions {
   # Required info about this server.
-  [McpImplementation] $ServerInfo # required
+  [ValidateNotNullOrEmpty()][McpImplementation] $ServerInfo # required
   # Server capabilities to advertise.
   [Nullable[McpServerCapabilities]] $Capabilities
   # Protocol version server will use.
@@ -5111,7 +4899,7 @@ class McpScriptBlockServerTool : McpServerTool {
           # Invoke the scriptblock, passing arguments and context
           # Need to cast/deserialize $request.Params based on tool schema
           $toolParams = $request.Params -as [McpCallToolRequestParams] # Example cast
-          $arguments = $toolParams?.Arguments ?? @{}
+          $arguments = $toolParams.Arguments ?? @{}
 
           # Scriptblock signature: param($argumentsDictionary, $requestContext, $cancellationToken)
           $result = . $this._scriptBlock $arguments $request $cancellationToken # Invoke
@@ -5150,7 +4938,7 @@ class McpServerToolCollection : ConcurrentDictionary[string, McpServerTool] {
 
   [void] AddTool([McpServerTool]$tool) {
     if ($null -eq $tool) { throw [ArgumentNullException]::new("tool") }
-    if (-not $this.TryAdd($tool.ProtocolTool.Name, $tool)) {
+    if (!$this.TryAdd($tool.ProtocolTool.Name, $tool)) {
       throw [ArgumentException]::new("Tool with name '$($tool.ProtocolTool.Name)' already exists.")
     }
     $this.RaiseChanged()
@@ -5205,7 +4993,7 @@ class McpServerToolCollection : ConcurrentDictionary[string, McpServerTool] {
 class McpServer : McpJsonRpcEndpoint {
   # Implements McpIServer concept
   hidden [McpIServerTransport] $_serverTransport # Used if accepting connections
-  hidden [McpITransport] $_sessionTransport # Used if created with existing session or after accept
+  hidden [McpTransport] $_sessionTransport # Used if created with existing session or after accept
   hidden [bool] $_ownsSessionTransport = $false # Did we create it via AcceptAsync?
 
   [Nullable[McpClientCapabilities]] $ClientCapabilities
@@ -5228,7 +5016,7 @@ class McpServer : McpJsonRpcEndpoint {
 
   # Constructor accepting an already connected ITransport session
   McpServer(
-    [McpITransport]$transport,
+    [McpTransport]$transport,
     [McpServerOptions]$options,
     [Nullable[ILoggerFactory]]$loggerFactory,
     [Nullable[IServiceProvider]]$serviceProvider
@@ -5375,7 +5163,7 @@ class McpServer : McpJsonRpcEndpoint {
       })
 
     # Resources
-    if ($options.Capabilities?.Resources) {
+    if ($options.Capabilities.Resources) {
       $resCap = $options.Capabilities.Resources
       # Use handlers stored directly on McpServerOptions for simplicity
       $listResHandler = $options.ListResourcesHandler ?? [scriptblock] { param($ctx, $ct) return [Task]::FromResult([McpListResourcesResult]::new()) }
@@ -5405,7 +5193,7 @@ class McpServer : McpJsonRpcEndpoint {
       if ($resCap.Subscribe) {
         $subHandler = $options.SubscribeToResourcesHandler
         $unsubHandler = $options.UnsubscribeFromResourcesHandler
-        if ($null -eq $subHandler -or $unsubHandler -eq $null) { throw [McpServerException]::new("Resources.Subscribe enabled but Subscribe/Unsubscribe handlers missing.") }
+        if ($null -eq $subHandler -or $null -eq $unsubHandler) { throw [McpServerException]::new("Resources.Subscribe enabled but Subscribe/Unsubscribe handlers missing.") }
 
         $this.SetRequestHandler("resources/subscribe", [scriptblock] {
             param($req, $ct)
@@ -5424,10 +5212,10 @@ class McpServer : McpJsonRpcEndpoint {
     }
 
     # Prompts
-    if ($options.Capabilities?.Prompts) {
+    if ($options.Capabilities.Prompts) {
       $listPromptsHandler = $options.ListPromptsHandler
       $getPromptHandler = $options.GetPromptHandler
-      if ($null -eq $listPromptsHandler -or $getPromptHandler -eq $null) { throw [McpServerException]::new("Prompts capability enabled but ListPrompts/GetPrompt handlers missing.") }
+      if ($null -eq $listPromptsHandler -or $null -eq $getPromptHandler) { throw [McpServerException]::new("Prompts capability enabled but ListPrompts/GetPrompt handlers missing.") }
 
       $this.SetRequestHandler("prompts/list", [scriptblock] {
           param($req, $ct)
@@ -5447,9 +5235,9 @@ class McpServer : McpJsonRpcEndpoint {
     $this.SetupToolsHandlers($options)
 
     # Logging
-    if ($options.Capabilities?.Logging) {
+    if ($options.Capabilities.Logging) {
       $setLevelHandler = $options.SetLoggingLevelHandler
-      if ($setLevelHandler -eq $null) { throw [McpServerException]::new("Logging capability enabled but SetLoggingLevelHandler missing.") }
+      if ($null -eq $setLevelHandler) { throw [McpServerException]::new("Logging capability enabled but SetLoggingLevelHandler missing.") }
 
       $this.SetRequestHandler("logging/setLevel", [scriptblock] {
           param($req, $ct)
@@ -5484,7 +5272,7 @@ class McpServer : McpJsonRpcEndpoint {
 
   hidden [void] SetupToolsHandlers([McpServerOptions]$options) {
     # Return void
-    $toolsCap = $options.Capabilities?.Tools
+    $toolsCap = $options.Capabilities.Tools
     $originalListHandler = $options.ListToolsHandler # Get handlers possibly set directly on options
     $originalCallHandler = $options.CallToolHandler
     $toolCollection = $options.ToolCollection
@@ -5492,7 +5280,7 @@ class McpServer : McpJsonRpcEndpoint {
     $effectiveListHandler = $originalListHandler
     $effectiveCallHandler = $originalCallHandler
 
-    if ($toolCollection -ne $null -and $toolCollection.Count -gt 0) {
+    if ($null -ne $toolCollection -and $toolCollection.Count -gt 0) {
       $this.Logger.LogTrace("Setting up merged tool handlers for ToolCollection.")
       # Create merged handlers
       $effectiveListHandler = [scriptblock] {
@@ -5500,13 +5288,13 @@ class McpServer : McpJsonRpcEndpoint {
         $req = $ctx.Params -as [McpListToolsRequestParams] # Cast params
         $result = [McpListToolsResult]::new()
         # Add tools from collection (no pagination for collection)
-        if ($req.Cursor -eq $null) {
+        if ($null -eq $req.Cursor) {
           # Only add collection tools on first page request
           $result.Tools.AddRange(($toolCollection.Values | ForEach-Object { $_.ProtocolTool }))
         }
 
         # Call original handler if present for additional tools (supports pagination)
-        if ($originalListHandler -ne $null) {
+        if ($null -ne $originalListHandler) {
           $origResultTask = . $originalListHandler $ctx $ct # Expects Task<McpListToolsResult> -> Task<object>
           $origResultTask.Wait($ct) # Blocking wait
           $origResult = $origResultTask.Result -as [McpListToolsResult]
@@ -5523,12 +5311,12 @@ class McpServer : McpJsonRpcEndpoint {
         $tool = $null
         $toolRef = New-Object PSObject # Create object to hold ref output
         $toolRef | Add-Member -MemberType NoteProperty -Name Value -Value $null
-        if ($req -ne $null -and $toolCollection.TryGetTool($req.Name, [ref]$toolRef)) {
+        if ($null -ne $req -and $null -ne $toolCollection.TryGetTool($req.Name, [ref]$toolRef)) {
           $tool = $toolRef.Value
           # Tool found in collection, invoke it
           $this.Logger.LogTrace("Invoking tool '$($req.Name)' from collection.")
           return $tool.InvokeAsync($ctx, $ct) # Returns Task<McpCallToolResponse> -> Task<object>
-        } elseif ($originalCallHandler -ne $null) {
+        } elseif ($null -ne $originalCallHandler) {
           # Tool not in collection, try original handler
           $this.Logger.LogTrace("Tool '$($req.Name)' not in collection, forwarding to original call handler.")
           return . $originalCallHandler $ctx $ct # Expects Task<McpCallToolResponse> -> Task<object>
@@ -5540,8 +5328,8 @@ class McpServer : McpJsonRpcEndpoint {
       }
 
       # Ensure Tools capability exists if using ToolCollection
-      if ($options.Capabilities?.Tools -eq $null) {
-        if ($options.Capabilities -eq $null) { $options.Capabilities = [McpServerCapabilities]::new() }
+      if ($null -eq $options.Capabilities.Tools) {
+        if ($null -eq $options.Capabilities) { $options.Capabilities = [McpServerCapabilities]::new() }
         $options.Capabilities.Tools = [McpToolsCapability]::new()
         $toolsCap = $options.Capabilities.Tools
       }
@@ -5549,8 +5337,8 @@ class McpServer : McpJsonRpcEndpoint {
     }
 
     # Register the effective handlers if either handler exists
-    if ($effectiveListHandler -ne $null -or $effectiveCallHandler -ne $null) {
-      if ($effectiveListHandler -eq $null -or $effectiveCallHandler -eq $null) {
+    if ($null -ne $effectiveListHandler -or $null -ne $effectiveCallHandler) {
+      if ($null -eq $effectiveListHandler -or $null -eq $effectiveCallHandler) {
         throw [McpServerException]::new("Both ListTools and CallTool handlers must be provided if Tools capability is active.")
       }
       $this.SetRequestHandler("tools/list", [scriptblock] {
@@ -5566,7 +5354,7 @@ class McpServer : McpJsonRpcEndpoint {
           return . $effectiveCallHandler $context $ct # Expects Task<McpCallToolResponse> -> Task<object>
         })
       $this.Logger.LogTrace("Registered effective tool handlers.")
-    } elseif ($toolsCap -ne $null) {
+    } elseif ($null -ne $toolsCap) {
       # Capability exists but no handlers found (ToolCollection was empty and no explicit handlers)
       $this.Logger.LogWarning("Tools capability is configured but no tool handlers or ToolCollection tools are available.")
     }
@@ -5579,7 +5367,7 @@ class McpServer : McpJsonRpcEndpoint {
     $this.Logger.LogInformation("Disposing Server endpoint $($this.EndpointName)...")
 
     # Detach ToolCollection handler if attached
-    if ($this.ServerOptions.ToolCollection -ne $null) {
+    if ($null -ne $this.ServerOptions.ToolCollection) {
       $this.ServerOptions.ToolCollection.OnChanged = $null # Remove callback
       $this.Logger.LogTrace("Detached ToolCollection changed handler.")
     }
@@ -5590,7 +5378,7 @@ class McpServer : McpJsonRpcEndpoint {
 
     # Dispose the session transport IF we created it via AcceptAsync
     $sessionTransportToDispose = $this._sessionTransport
-    if ($this._ownsSessionTransport -and $sessionTransportToDispose -ne $null) {
+    if ($this._ownsSessionTransport -and $null -ne $sessionTransportToDispose) {
       $this._sessionTransport = $null
       $this.Logger.LogTrace("Disposing owned server session transport...")
       try { $sessionTransportToDispose.DisposeAsync().Wait([TimeSpan]::FromSeconds(2)) } catch {
@@ -5602,7 +5390,7 @@ class McpServer : McpJsonRpcEndpoint {
 
     # Dispose the server transport if we have one (it stops listening)
     $serverTransportToDispose = $this._serverTransport
-    if ($serverTransportToDispose -ne $null) {
+    if ($null -ne $serverTransportToDispose) {
       $this._serverTransport = $null
       $this.Logger.LogTrace("Disposing server transport listener...")
       try { $serverTransportToDispose.DisposeAsync().Wait([TimeSpan]::FromSeconds(5)) } catch {
@@ -5619,13 +5407,13 @@ class McpServer : McpJsonRpcEndpoint {
 # --- Server Factory ---
 class McpServerFactory {
   static [McpServer] Create( # Return concrete type
-    [McpITransport]$transport, # Already connected transport
+    [McpTransport]$transport, # Already connected transport
     [McpServerOptions]$serverOptions,
     [Nullable[ILoggerFactory]]$loggerFactory = $null,
     [Nullable[IServiceProvider]]$serviceProvider = $null
   ) {
-    if ($transport -eq $null) { throw [ArgumentNullException]::new("transport") }
-    if ($serverOptions -eq $null) { throw [ArgumentNullException]::new("serverOptions") }
+    if ($null -eq $transport) { throw [ArgumentNullException]::new("transport") }
+    if ($null -eq $serverOptions) { throw [ArgumentNullException]::new("serverOptions") }
     # Add validation for ServerInfo?
     return [McpServer]::new($transport, $serverOptions, $loggerFactory, $serviceProvider)
   }
@@ -5668,7 +5456,7 @@ class McpServerFactory {
           # Acceptance failed or other error
           $logger = if ($loggerFactory) { $loggerFactory.CreateLogger([McpServerFactory]) } else { [NullLogger]::Instance }
           $logger.LogError("Error during server factory AcceptAsync: $($_.Exception.Message)")
-          if ($mcpServer -ne $null) {
+          if ($null -ne $mcpServer) {
             try { $mcpServer.DisposeAsync().Wait(1000) } catch {
               $null
             }
@@ -5737,6 +5525,92 @@ class McpServerHandlers {
     }
   }
 }
+
+#region    Main_class
+# UsageExample
+# .EXAMPLE
+<# Example usage with HTTP transport
+Write-Host "--- MCP PowerShell SDK Example Usage ---"
+$httpTransport = [HttpClientTransport]::new("http://localhost:8080/mcp")
+$mcp = [MCP]::Create($httpTransport)
+$mcp.Initialize()
+
+# Get available tools
+$tools = $mcp.ListTools()
+$tools.tools | ForEach-Object {
+    Write-Host "Tool: $($_.Name) - $($_.Description)"
+}
+
+# Call a tool
+$result = $mcp.CallTool("weatherTool", @{ location = "New York" })
+Write-Host "Tool result: $($result.Content.Text)"
+
+# Example with Stdio transport
+$serverParams = [ServerParameters]::new("node")
+    .AddArgs(@("mcp-server.js", "--port=8080"))
+    .AddEnv(@{ MCP_ENV = "production" })
+    .Build()
+
+$stdioTransport = [StdioClientTransport]::new($serverParams)
+$mcp = [MCP]::Create($stdioTransport)
+$mcp.Initialize()
+#>
+class MCP {
+  # .SYNOPSIS
+  #   Model Context Protocol
+  # .DESCRIPTION
+  #   Provides basic MCP implementation, allowing creation of MCP servers and clients.
+  [McpSyncClient]$SyncClient
+  [McpAsyncClient]$AsyncClient
+  [ClientMcpTransport]$Transport
+  [ObjectMapper]$Mapper
+
+  MCP([ClientMcpTransport]$transport) {
+    $this.Transport = $transport
+    $this.Mapper = [ObjectMapper]::new()
+    $this.AsyncClient = [McpAsyncClient]::new($transport, [TimeSpan]::FromSeconds(30), $null)
+    $this.SyncClient = [McpSyncClient]::new($this.AsyncClient)
+  }
+
+  [void] Initialize() {
+    $this.SyncClient.Initialize() | Out-Null
+  }
+
+  [string] Ping() {
+    return $this.SyncClient.Ping()
+  }
+
+  [ListToolsResult] ListTools() {
+    return $this.SyncClient.ListTools()
+  }
+
+  [CallToolResult] CallTool([string]$toolName, [hashtable]$arguments) {
+    $request = [CallToolRequest]::new($toolName, $arguments)
+    return $this.SyncClient.CallTool($request)
+  }
+
+  [ListResourcesResult] ListResources() {
+    return $this.SyncClient.ListResources()
+  }
+
+  [ReadResourceResult] ReadResource([string]$uri) {
+    $request = [ReadResourceRequest]::new($uri)
+    return $this.SyncClient.ReadResourceRequest($request)
+  }
+
+  static [MCP] Create([ClientMcpTransport]$transport) {
+    return [MCP]::new($transport)
+  }
+
+  static [McpClientAsyncSpec] async ([ClientMcpTransport]$transport) {
+    return [McpClientAsyncSpec]::new($transport)
+  }
+
+  static  [McpClientSyncSpec] sync ([ClientMcpTransport]$transport) {
+    return  [McpClientSyncSpec]::new($transport)
+  }
+}
+#endregion Main_class
 
 
 
