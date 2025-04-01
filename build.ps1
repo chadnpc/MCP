@@ -1,7 +1,7 @@
 ﻿
 #!/usr/bin/env pwsh
 # .SYNOPSIS
-#   MCP buildScript v0.1.0
+#   MCP buildScript v0.1.1
 # .DESCRIPTION
 #   A custom build script for the module MCP
 # .LINK
