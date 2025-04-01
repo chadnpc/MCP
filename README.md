@@ -17,124 +17,96 @@ then
 ```PowerShell
 Import-Module MCP
 
-# --- Client Example ---
-$serverConfig = [McpServerConfig]@{
-    Id = "my-stdio-server"
-    Name = "My Stdio Server"
-    TransportType = [McpTransportTypes]::StdIo
-    Location = "path/to/your/mcp_server_executable.exe" # Or 'node', 'python', etc.
-    Arguments = "--stdio" # Arguments for the server
-    TransportOptions = @{ # Optional transport specific things
-        # workingDirectory = "C:\path\to\server\dir"
+Write-Host "--- MCP PowerShell SDK Example Server ---"
+
+try {
+    $serverOptions = [McpServerOptions]::new("MyStaticServer", "1.2.0")
+    $serverOptions.Capabilities.Tools = [McpToolsCapability]::new()
+    $serverOptions.Logger = [McpConsoleLogger]::new([McpLoggingLevel]::Debug, "MyStaticServer")
+
+    # Use the static factory method
+    $server = [MCP]::StartServer($serverOptions) # Assumes using console stdio
+
+    # Register handlers (same as before)
+    $server.RegisterRequestHandler("tools/list", {
+        param($params, $cancellationToken)
+        $serverOptions.Logger.Log([McpLoggingLevel]::Info, "Handling tools/list request.")
+        $tool1 = [McpTool]::new("echo_tool", "Echoes input.", @{ type = 'object'; properties = @{ 'input_string' = @{ type = 'string'} }; required = @('input_string') })
+        $tool2 = [McpTool]::new("get_date", "Returns current date.", @{ type = 'object'; properties = @{} })
+        return [McpListToolsResult]@{ Tools = @($tool1, $tool2) }
+    })
+    $server.RegisterRequestHandler("tools/call", {
+        param($paramsRaw, $cancellationToken)
+        $callParams = [McpJsonUtilities]::DeserializeParams($paramsRaw, [McpCallToolRequestParams])
+        $serverOptions.Logger.Log([McpLoggingLevel]::Info, "Handling tools/call for '$($callParams.Name)'.")
+        $response = [McpCallToolResponse]::new()
+        # ... (rest of handler logic as before) ...
+        return $response
+    })
+
+    Write-Host "Server started via MCP::StartServer. Waiting for client..."
+    Write-Host "Press Ctrl+C to stop."
+
+    # Keep alive loop (same as before)
+    while ($server.IsConnected) {
+        Start-Sleep -Seconds 1
+        if ($server._endpoint._messageProcessingJob.State -eq 'Failed') {
+            Write-Error "Server processing job failed!"
+            break
+        }
+    }
+
+} catch {
+    Write-Error "Server failed to start or run: $($_.Exception.ToString())"
+} finally {
+    if ($null -ne $server) {
+        Write-Host "Shutting down server..."
+        $server.Dispose()
     }
 }
 
-$clientOptions = [McpClientOptions]@{
-    ClientInfo = [McpImplementation]@{ Name = "MyPowerShellClient"; Version = "0.1" }
-    # Define client capabilities if needed (e.g., sampling handler)
-    # Capabilities = ...
-}
 
-# Create and connect the client
-$mcpClient = New-McpClient -ServerConfig $serverConfig -ClientOptions $clientOptions
-
+# --- Example Client Usage ---
 try {
-  Write-Host "Client Connected: $($mcpClient.IsConnected)"
-  Write-Host "Server Name: $($mcpClient.ServerInfo.Name)"
+    $clientOptions = [McpClientOptions]::new()
+    $clientOptions.Logger = [McpConsoleLogger]::new([McpLoggingLevel]::Debug, "MyClient")
 
-  # Ping the server
-  Write-Host "Pinging server..."
-  $pingJob = $mcpClient.PingAsync([CancellationToken]::None)
-  $pingJob | Wait-Job | Out-Null
-  if ($pingJob.State -eq 'Failed') { throw $pingJob.Error[0].Exception }
-  $pingResult = $pingJob | Receive-Job
-  Write-Host "Ping Result: Success (raw result: $pingResult)" # PingResult is empty obj
+    # Use the static factory method
+    $client = [MCP]::CreateClient(
+        Command = "pwsh", # Assuming the server script is run with pwsh
+        Arguments = @("-File", "path/to/your/server/script.ps1"),
+        Options = $clientOptions
+    )
 
-  # List tools
-  Write-Host "Listing tools..."
-  $listToolsJob = $mcpClient.ListToolsAsync([CancellationToken]::None)
-  $listToolsJob | Wait-Job | Out-Null
-  if ($listToolsJob.State -eq 'Failed') { throw $listToolsJob.Error[0].Exception }
-  $tools = $listToolsJob | Receive-Job # Returns List<McpClientTool>
-  Write-Host "Found $($tools.Count) tools:"
-  $tools.ForEach({ Write-Host " - $($_.ToString())" })
+    Write-Host "Client connected to Server: $($client.ServerInfo.Name) v$($client.ServerInfo.Version)"
 
-  # Call a tool (assuming 'echo' tool exists)
-  if ($tools.Name -contains 'echo') {
-    Write-Host "Calling 'echo' tool..."
-    $callArgs = @{ message = "Hello from PowerShell MCP Client!" }
-    $callToolJob = $mcpClient.CallToolAsync('echo', $callArgs, [CancellationToken]::None)
-    $callToolJob | Wait-Job | Out-Null
-    if ($callToolJob.State -eq 'Failed') { throw $callToolJob.Error[0].Exception }
-    $callResultRaw = $callToolJob | Receive-Job
-    # Deserialize the raw result object
-    $callResult = [McpJsonUtilities]::DeserializeParams($callResultRaw, [McpCallToolResponse])
+    # Example: List tools
+    $listToolsJob = $client.ListAllToolsAsync()
+    $listToolsJob | Wait-Job
+    if ($listToolsJob.State -eq 'Completed') {
+        $allTools = $listToolsJob | Receive-Job
+        Write-Host "Available Tools:"
+        $allTools.ForEach({ Write-Host "- $($_.Name): $($_.Description)"})
+    } else { Write-Error "Failed to list tools: $($listToolsJob.Error[0].Exception.Message)" }
+    $listToolsJob | Remove-Job
 
-    if ($callResult.IsError) {
-      Write-Warning "Tool call resulted in an error: $($callResult.Content[0].Text)"
-    } else {
-      Write-Host "Echo Tool Result: $($callResult.Content[0].Text)"
-    }
-    $callToolJob | Remove-Job
-  }
+    # Example: Call echo tool
+    $echoArgs = @{ input_string = "Hello from PowerShell Client!" }
+    $callJob = $client.CallToolAsync("echo_tool", $echoArgs)
+    $callJob | Wait-Job
+    if ($callJob.State -eq 'Completed') {
+        $callResult = $callJob | Receive-Job
+        Write-Host "CallTool Result: $($callResult.Content[0].Text)"
+    } else { Write-Error "Failed to call tool: $($callJob.Error[0].Exception.Message)" }
+    $callJob | Remove-Job
 
-  $pingJob | Remove-Job
-  $listToolsJob | Remove-Job
+} catch {
+     Write-Error "Client failed: $($_.Exception.ToString())"
 } finally {
-  Write-Host "Disposing client..."
-  $mcpClient | Dispose
-}
-
-
-# --- Server Example ---
-
-$serverOptions = [McpServerOptions]@{
-    ServerInfo = [McpImplementation]@{ Name = "MyPowerShellServer"; Version = "0.1" }
-    # Define server capabilities (optional, defaults are usually okay unless disabling something)
-    # Capabilities = ...
-}
-
-# Define a tool using a scriptblock
-$echoToolScript = {
-    param($request, $cancellationToken) # McpJsonRpcRequest, CancellationToken
-    # Handlers MUST return Task<object>
-    $task = [Task]::Run( {
-        $toolParams = [McpJsonUtilities]::DeserializeParams($request.Params, [McpCallToolRequestParams])
-        $msg = $toolParams.Arguments.message ?? "No message provided"
-        $responseText = "PowerShell Echo: $msg"
-        # Return the correct response type
-        return [McpCallToolResponse]@{ Content = @([McpContent]@{ Type = 'text'; Text = $responseText }); IsError = $false }
-    }, $cancellationToken)
-    return $task # Return the task
-}
-
-$echoToolDef = [McpTool]@{
-    Name = 'echo'
-    Description = 'Echoes back the input message.'
-    InputSchema = [McpJsonUtilities]::Deserialize[System.Text.Json.JsonElement]('{"type":"object", "properties": {"message": {"type":"string"}}, "required":["message"]}')
-}
-$echoServerTool = [McpServerTool]::new($echoToolDef, $echoToolScript)
-
-$toolCollection = [McpServerToolCollection]::new()
-$toolCollection.AddOrUpdateTool($echoServerTool)
-
-# Define request handlers (optional, server has built-ins for initialize, ping, tools/list, tools/call)
-$requestHandlers = @{
-    # "myCustomMethod" = { param($req, $ct) ... return [Task]::FromResult(...) }
-}
-
-# Start the server using Stdio
-Write-Host "Starting MCP Server (Stdio)..."
-$mcpServer = Start-McpServer -Options $serverOptions -TransportType StdIo -ToolCollection $toolCollection -RequestHandlers $requestHandlers -PassThru
-
-Write-Host "Server started. Press Ctrl+C to stop."
-try {
-    # Keep running until interrupted
-    while ($true) { Start-Sleep -Seconds 1 }
-} finally {
-    Write-Host "Stopping server..."
-    $mcpServer | Dispose
-    Write-Host "Server stopped."
+     if ($null -ne $client) {
+          Write-Host "Closing client..."
+          $client.Dispose()
+     }
 }
 
 ```
