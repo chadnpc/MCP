@@ -559,7 +559,16 @@ class McpJsonUtilities {
 
 # Simple Logger Interface/Base
 class McpLogger {
-  Log([McpLoggingLevel]$level, [string]$message, [Exception]$exception = $null) {
+  McpLogger() {
+    [void][McpLogger]::From("Info", "", [ref]$this)
+  }
+  McpLogger([McpLoggingLevel]$minLevel) {
+    [void][McpLogger]::From($minLevel, "", [ref]$this)
+  }
+  static hidden [McpLogger] From([McpLoggingLevel]$level, [string]$message, [ref]$o) {
+    return $o.Value
+  }
+  Log([McpLoggingLevel]$level, [string]$message, [Exception]$exception) {
     # Abstract method placeholder
     throw [NotImplementedException]::new("Log method must be implemented by derived logger class.")
   }
@@ -577,8 +586,10 @@ class McpConsoleLogger : McpLogger {
     $this.MinimumLevel = $minLevel
     $this.Prefix = if ([string]::IsNullOrWhiteSpace($Prefix)) { "" } else { "[$Prefix] " }
   }
-
-  Log([McpLoggingLevel]$level, [string]$message, [Exception]$exception = $null) {
+  [void] Log([McpLoggingLevel]$level, [string]$message) {
+    $this.Log($level, $message, $null)
+  }
+  [void] Log([McpLoggingLevel]$level, [string]$message, [Exception]$exception = $null) {
     if ($level -ge $this.MinimumLevel) {
       $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'
       $logLine = "$($this.Prefix)$timestamp [$($level.ToString().ToUpper())] - $message"
@@ -750,7 +761,7 @@ class McpStdioTransport : McpTransport {
         }.GetNewClosure() # Capture $this (logger)
         $this._process.add_ErrorDataReceived($stderrHandler)
 
-        $this.Logger.Log([McpLoggingLevel]::Information, "Starting process: $($startInfo.FileName) $($startInfo.Arguments)")
+        $this.Logger.Log([McpLoggingLevel]::Info, "Starting process: $($startInfo.FileName) $($startInfo.Arguments)")
         if (-not $this._process.Start()) {
           throw [McpTransportException]::new("Failed to start process.")
         }
@@ -778,7 +789,7 @@ class McpStdioTransport : McpTransport {
     if (!$this.IsConnected -or $null -eq $this._writer) {
       throw [McpTransportException]::new("Cannot send message, stdio transport not connected or writer unavailable.")
     }
-    if ($this._process -ne $null -and $this._process.HasExited) {
+    if ($null -ne $this._process -and $this._process.HasExited) {
       throw [McpTransportException]::new("Cannot send message, stdio process has exited.")
     }
     try {
@@ -798,7 +809,7 @@ class McpStdioTransport : McpTransport {
   hidden StartReceivingJob() {
     if ($null -ne $this._stdoutJob) { return } # Already started
 
-    $this.Logger.Log([McpLoggingLevel]::Information, "($($this.TransportId)) Starting stdio reading job.")
+    $this.Logger.Log([McpLoggingLevel]::Info, "($($this.TransportId)) Starting stdio reading job.")
     $jobScript = {
       param($readerRef, $receiveCtsTokenRef, $transportRef) # Pass transport to call ReceiveMessage
       $ErrorActionPreference = 'Continue' # Don't stop job on single line parse error
@@ -860,7 +871,7 @@ class McpStdioTransport : McpTransport {
       $this # Pass the transport instance itself
     )
     Register-ObjectEvent -InputObject $this._stdoutJob -EventName StateChanged -Action {
-      param($sender, $eventArgs)
+      param($local:sender, $local:eventArgs)
       $job = $sender -as [System.Management.Automation.Job]
       $transport = $job.PSJobTypeName # Hack: Store transport ID here? Better way? Maybe store transport in $job.PrivateData?
       if ($job.State -in 'Failed', 'Stopped', 'Completed') {
@@ -897,7 +908,7 @@ class McpStdioTransport : McpTransport {
 
   [void] Dispose() {
     if (!$this.IsConnected) { return } # Avoid double dispose actions
-    $this.Logger.Log([McpLoggingLevel]::Information, "($($this.TransportId)) Disposing StdioTransport (ServerMode: $($this._isServerMode))...")
+    $this.Logger.Log([McpLoggingLevel]::Info, "($($this.TransportId)) Disposing StdioTransport (ServerMode: $($this._isServerMode))...")
     # Stop reader job first
     $this.StopReceiving()
 
@@ -918,7 +929,7 @@ class McpStdioTransport : McpTransport {
     # Handle process if in client mode
     if (-not $this._isServerMode -and $null -ne $proc) {
       if (-not $proc.HasExited) {
-        $this.Logger.Log([McpLoggingLevel]::Information, "($($this.TransportId)) Attempting to kill stdio process $($proc.Id)...")
+        $this.Logger.Log([McpLoggingLevel]::Info, "($($this.TransportId)) Attempting to kill stdio process $($proc.Id)...")
         try {
           $proc.Kill($true) # Kill process tree
           $proc.WaitForExit(3000) # Wait briefly
@@ -939,7 +950,7 @@ class McpStdioTransport : McpTransport {
 
     # Call base dispose AFTER specific cleanup
     # Base dispose will handle queue disposal.
-    $this.Logger.Log([McpLoggingLevel]::Information, "($($this.TransportId)) StdioTransport disposed.")
+    $this.Logger.Log([McpLoggingLevel]::Info, "($($this.TransportId)) StdioTransport disposed.")
   }
 }
 
@@ -1044,7 +1055,7 @@ class McpEndpoint : IDisposable {
       $notificationHandlers = $endpointRef._notificationHandlers
       $pendingRequests = $endpointRef._pendingRequests
 
-      $logger.Log([McpLoggingLevel]::Information, "Message processing job started for $endpointName")
+      $logger.Log([McpLoggingLevel]::Info, "Message processing job started for $endpointName")
       try {
         # Consume messages from the transport's queue
         # GetConsumingEnumerable blocks until a message is available or CompleteAdding is called
@@ -1089,11 +1100,11 @@ class McpEndpoint : IDisposable {
       $this # Pass the endpoint instance itself
     )
     $this._messageProcessingJob = $job
-    $this._logger.Log([McpLoggingLevel]::Information, "Message processing job $($job.Id) started for $($this._endpointName)")
+    $this._logger.Log([McpLoggingLevel]::Info, "Message processing job $($job.Id) started for $($this._endpointName)")
 
     # Register cleanup for when the job finishes (optional but good practice)
     Register-ObjectEvent -InputObject $job -EventName StateChanged -Action {
-      param($sender, $eventArgs)
+      param($local:sender, $local:eventArgs)
       $jobState = $sender.State
       # How to get endpoint ref here? Maybe store ID in job name/PrivateData?
       # Write-Host "MCP Job $($sender.Id) State Changed: $jobState"
@@ -1145,7 +1156,7 @@ class McpEndpoint : IDisposable {
     # Invoke handler in a separate job to avoid blocking the processing loop
     # Pass necessary context: params and cancellation token
     $handlerJob = Start-ThreadJob -Name "Handler_$($request.Method)_$($request.Id)" -ScriptBlock {
-      param($handlerScript, $requestParamsRaw, $handlerCancellationToken, $endpointLogger)
+      param([scriptblock]$handlerScript, $requestParamsRaw, $handlerCancellationToken, $endpointLogger)
       $ErrorActionPreference = 'Stop' # Errors in handler should fail the job
       $handlerLogger = $endpointLogger # Use same logger for context
       $result = $null
@@ -1154,7 +1165,7 @@ class McpEndpoint : IDisposable {
         $handlerLogger.Log([McpLoggingLevel]::Debug, "Invoking handler...")
         # Handler signature: param($Params, $CancellationToken)
         # $handlerScript is the scriptblock stored in _requestHandlers
-        $result = & $handlerScript $requestParamsRaw $handlerCancellationToken
+        $result = $handlerScript.Invoke($requestParamsRaw, $handlerCancellationToken)
         $handlerLogger.Log([McpLoggingLevel]::Debug, "Handler returned.")
         return $result # Output the result
       } catch [OperationCanceledException] {
@@ -1174,7 +1185,7 @@ class McpEndpoint : IDisposable {
 
     # Register an action to send the response/error when the handler job completes
     Register-ObjectEvent -InputObject $handlerJob -EventName StateChanged -Action {
-      param($sender, $eventArgs)
+      param($local:sender, $local:eventArgs)
       $completedJob = $sender -as [System.Management.Automation.Job]
       $requestInfo = $completedJob.PrivateData # Retrieve request ID and transport
       $jobState = $completedJob.State
@@ -1812,7 +1823,7 @@ class MCP {
       # Using Stdio Client Mode constructor
       $transport = [McpStdioTransport]::new(
         $Command,
-                ($Arguments -join ' '),
+        [string]::Join(' ', $Arguments),
         $WorkingDirectory,
         $EnvironmentVariables,
         $clientLogger
@@ -1880,11 +1891,14 @@ class MCP {
       throw # Rethrow
     }
   }
-
-  # Static method to start a server listening (currently Stdio only).
-  # Returns an McpServer instance ready to have handlers registered.
-  # The caller's script must remain running for the server to operate.
+  static [McpServer] StartServer([McpServerOptions]$Options) {
+    return [MCP]::StartServer($Options, [MCP]::stdin, [MCP]::stdout)
+  }
   static [McpServer] StartServer([McpServerOptions]$Options, [Stream]$InputStream, [Stream]$OutputStream) {
+    # .DESCRIPTION
+    # A static method to start a server listening (currently Stdio only).
+    # Returns an McpServer instance ready to have handlers registered.
+    # The caller's script must remain running for the server to operate.
     # TODO: Add params for other transports later (e.g., -Port for SSE)
     $serverOptions = $Options # Use provided options
     $serverLogger = $serverOptions.Logger ?? [McpConsoleLogger]::new([McpLoggingLevel]::Info, "MCP-Server")
@@ -1940,7 +1954,58 @@ class MCP {
 
 # Types that will be available to users when they import the module.
 $typestoExport = @(
-  [MCP], [McpClient], [McpServer]
+  [MCP], [McpClient], [McpServer], [McpClientOptions], [McpServerOptions],
+  [McpImplementation], [McpContent], [McpResource], [McpResourceContents], [McpResourceTemplate],
+  [McpTool], [McpPrompt], [McpPromptMessage], [McpPromptArgument], [McpRoot],
+  [McpSamplingMessage],
+  [McpModelHint],
+  [McpModelPreferences],
+  [McpAnnotations],
+  [McpToolAnnotations],
+  [McpInitializeRequestParams],
+  [McpCallToolRequestParams],
+  [McpReadResourceRequestParams],
+  [McpSubscribeRequestParams],
+  [McpUnsubscribeRequestParams],
+  [McpGetPromptRequestParams],
+  [McpCreateMessageRequestParams],
+  [McpSetLevelRequestParams],
+  [McpInitializeResult],
+  [McpPaginatedResult],
+  [McpListToolsResult],
+  [McpCallToolResponse],
+  [McpListResourcesResult],
+  [McpReadResourceResult],
+  [McpListResourceTemplatesResult],
+  [McpListPromptsResult],
+  [McpGetPromptResult],
+  [McpCreateMessageResult],
+  [McpListRootsResult],
+  [McpEmptyResult],
+  [McpLoggingMessageNotificationParams],
+  [McpResourceUpdatedNotificationParams],
+  [McpClientCapabilities],
+  [McpServerCapabilities],
+  [McpCapabilityBase],
+  [McpRootsCapability],
+  [McpSamplingCapability],
+  [McpLoggingCapability],
+  [McpPromptsCapability],
+  [McpResourcesCapability],
+  [McpToolsCapability],
+  [McpError],
+  [McpTransportException],
+  [McpClientException],
+  [McpServerException],
+  [McpRole],
+  [McpContextInclusion],
+  [McpLoggingLevel],
+  [McpTransportType],
+  [McpErrorCodes],
+  [McpStopReason],
+  [McpLogger],
+  [McpConsoleLogger],
+  [McpNullLogger]
 )
 $TypeAcceleratorsClass = [PsObject].Assembly.GetType('System.Management.Automation.TypeAccelerators')
 foreach ($Type in $typestoExport) {
