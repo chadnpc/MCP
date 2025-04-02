@@ -1,9 +1,64 @@
 ﻿function New-McpClient {
+  <#
+  .SYNOPSIS
+  Creates and initializes a new MCP client connection to a server process.
+  .DESCRIPTION
+  Launches a server process using the specified command and arguments,
+  establishes a connection (currently via Stdio), and performs the MCP
+  initialization handshake. Returns a connected and initialized McpClient object.
+  Uses the 'cliHelper.logger' module for logging. If no logger is provided,
+  a default console logger will be created. The caller is responsible for
+  disposing the logger instance when done.
+  .PARAMETER Command
+  The command or path to the executable that runs the MCP server.
+  (e.g., 'node', 'python', 'path/to/server.exe')
+  .PARAMETER Arguments
+  An array of arguments to pass to the server command.
+  .PARAMETER WorkingDirectory
+  The working directory for the server process. Defaults to the current directory.
+  .PARAMETER EnvironmentVariables
+  A hashtable of environment variables to set for the server process.
+  .PARAMETER Options
+  [Optional] An [McpClientOptions] object to configure client behavior.
+  .PARAMETER Logger
+  [Optional] A pre-configured logger instance from the 'cliHelper.logger' module.
+  If not provided, a default logger (writing Info level to console) will be created internally.
+  The caller is responsible for disposing this logger instance using $logger.Dispose().
+  .PARAMETER ConnectTimeoutSeconds
+  The timeout in seconds for establishing the connection and receiving the
+  initialization response from the server. Defaults to 30.
+  .EXAMPLE
+  # Requires cliHelper.logger to be imported
+  Import-Module cliHelper.logger
+  $myLogger = New-Logger -MinimumLevel Debug -Logdirectory "C:\logs\mcp_client"
+  try {
+    $client = New-McpClient -Command "path/to/server.ps1" -Arguments "-File" -Logger $myLogger
+    # ... use $client ...
+    $client.Dispose()
+  } finally {
+    $myLogger.Dispose() # Dispose the logger you created
+  }
+  .EXAMPLE
+  # Using the default internal logger (logs to console)
+  # You don't need to dispose the logger in this case, but you also don't control it
+  $client = New-McpClient -Command "path/to/server.exe"
+  # ... use $client ...
+  $client.Dispose() # Still need to dispose the client
+  .NOTES
+  Relies on the [MCP]::CreateClient static method for implementation.
+  Ensure the 'cliHelper.logger' module is available.
+  The caller is responsible for disposing the provided or default logger instance.
+  .LINK
+  MCP
+  McpClient
+  McpClientOptions
+  cliHelper.logger.Logger
+  #>
   [CmdletBinding()]
   param(
     [Parameter(Mandatory = $true)]
     [ValidateNotNullOrEmpty()]
-    [string]$Command, # e.g., 'node', 'python', 'path/to/server.exe'
+    [string]$Command,
 
     [string[]]$Arguments,
 
@@ -13,77 +68,36 @@
 
     [McpClientOptions]$Options,
 
-    [McpLogger]$Logger,
+    # Updated Logger parameter: Type is cliHelper.logger.Logger, Not Mandatory
+    [Parameter(Mandatory = $false)]
+    [cliHelper.logger.Logger]$Logger, # Caller provides instance, responsible for disposal
 
-    [int]$ConnectTimeoutSeconds = 30 # Timeout for connection and initialize
+    [int]$ConnectTimeoutSeconds = 30
   )
 
-  $clientOptions = $Options ?? [McpClientOptions]::new()
-  $clientLogger = $Logger ?? $clientOptions.Logger ?? [McpConsoleLogger]::new([McpLoggingLevel]::Info, "MCP-Client")
-  $clientOptions.Logger = $clientLogger # Ensure options has logger
-
-  $endpointName = "Client ($($clientOptions.ClientInfo.Name) for $Command)"
-  $client = $null
-  $transport = $null
-
   try {
-    $clientLogger.Log([McpLoggingLevel]::Info, "Creating Stdio transport for $Command")
-    $transport = [McpStdioTransport]::new(
+    # Delegate entirely to the static factory method in MCP class
+    # It now handles default logger creation if $Logger is $null
+    $client = [MCP]::CreateClient(
       $Command,
-            ($Arguments -join ' '),
+      $Arguments,
       $WorkingDirectory,
       $EnvironmentVariables,
-      $clientLogger
+      $Options, # Pass provided options or null
+      $Logger, # Pass provided logger or null
+      $ConnectTimeoutSeconds
     )
-
-    $clientLogger.Log([McpLoggingLevel]::Info, "Creating endpoint: $endpointName")
-    $endpoint = [McpEndpoint]::new($transport, $endpointName, $clientLogger)
-
-    $client = [McpClient]::new($endpoint, $clientOptions)
-
-    $clientLogger.Log([McpLoggingLevel]::Info, "Attempting to connect transport...")
-    $transport.Connect() # Starts process and reading job
-
-    $clientLogger.Log([McpLoggingLevel]::Info, "Starting endpoint processing...")
-    $endpoint.StartProcessing() # Starts the message handling job
-
-    $clientLogger.Log([McpLoggingLevel]::Info, "Sending initialize request...")
-    $initParams = [McpInitializeRequestParams]@{
-      ProtocolVersion = $clientOptions.ProtocolVersion
-      ClientInfo      = $clientOptions.ClientInfo
-      Capabilities    = $clientOptions.Capabilities
-    }
-
-    # Send initialize and wait for response with timeout
-    $initJob = $client.SendRequestAsync("initialize", $initParams, [McpInitializeResult], ([TimeSpan]::FromSeconds($ConnectTimeoutSeconds)))
-    $initJob | Wait-Job -Timeout $ConnectTimeoutSeconds # Throws TimeoutException or other on failure
-
-    $initResult = $initJob | Receive-Job
-    $initJob | Remove-Job
-
-    if ($null -eq $initResult) {
-      throw [McpClientException]::new("Did not receive valid InitializeResult from server.")
-    }
-
-    $clientLogger.Log([McpLoggingLevel]::Info, "Received InitializeResult from Server: $($initResult.ServerInfo.Name) v$($initResult.ServerInfo.Version) (Proto: $($initResult.ProtocolVersion))")
-    $client.SetServerInfo($initResult) # Update client with server details
-
-    # Send initialized notification
-    $clientLogger.Log([McpLoggingLevel]::Info, "Sending initialized notification...")
-    $client.SendNotification("initialized", $null) # Params are typically null/empty
-
-    $clientLogger.Log([McpLoggingLevel]::Info, "MCP Client initialization successful.")
+    # Return the successfully created client
     return $client
-  } catch [TimeoutException] {
-    $clientLogger.Log([McpLoggingLevel]::Critical, "Timeout waiting for client connection or initialization.")
-    if ($null -ne $client) { try { $client.Dispose() } catch { $null } }
-    elseif ($null -ne $transport) { try { $transport.Dispose() } catch { $null } }
-    throw # Rethrow
   } catch {
-    $clientLogger.Log([McpLoggingLevel]::Critical, "Failed to create or initialize MCP client: $($_.Exception.ToString())")
-    # Ensure cleanup
-    if ($null -ne $client) { try { $client.Dispose() } catch { $null } }
-    elseif ($null -ne $transport) { try { $transport.Dispose() } catch { $null } }
-    throw # Rethrow
+    # Catch exceptions from CreateClient and rethrow as terminating errors
+    $PSCmdlet.ThrowTerminatingError(
+      [System.Management.Automation.ErrorRecord]::new(
+        $_.Exception,
+        "FailedToCreateMcpClient",
+        [System.Management.Automation.ErrorCategory]::InvalidOperation,
+        $null # Target object is null or potentially the parameters?
+      )
+    )
   }
 }
