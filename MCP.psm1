@@ -28,11 +28,9 @@ enum McpContextInclusion {
   AllServers
 }
 
-# Simplified Transport Types
 enum McpTransportType {
   Stdio
   Sse # Covers HTTP POST + SSE stream
-  # Http # Removed for clarity, SSE is the primary HTTP-based method defined
 }
 
 enum McpErrorCodes {
@@ -43,8 +41,7 @@ enum McpErrorCodes {
   InvalidParams = -32602
   InternalError = -32603
   ServerError = -32000
-
-  # MCP Specific (Examples - Define as needed)
+  # MCP Specific
   RequestTimeout = -32001
   ResourceNotFound = -32002
   AccessDenied = -32003
@@ -897,7 +894,6 @@ class McpStdioTransport : McpTransport {
 
     # Call base dispose AFTER specific cleanup
     # Base dispose will handle queue disposal.
-    $base.Dispose() # Explicitly call base dispose
     $this.Logger.Info("($($this.TransportId)) StdioTransport disposed.")
   }
 }
@@ -2013,7 +2009,7 @@ $typestoExport = @(
   [McpUnsubscribeRequestParams],
   [McpGetPromptRequestParams],
   [McpCreateMessageRequestParams],
-  [McpSetLevelRequestParams], # Added - uses LogEventType
+  [McpSetLevelRequestParams],
   [McpInitializeResult],
   [McpPaginatedResult],
   [McpListToolsResult],
@@ -2026,7 +2022,7 @@ $typestoExport = @(
   [McpCreateMessageResult],
   [McpListRootsResult],
   [McpEmptyResult],
-  [McpLoggingMessageNotificationParams], # Added - uses LogEventType
+  [McpLoggingMessageNotificationParams],
   [McpResourceUpdatedNotificationParams],
   [McpClientCapabilities],
   [McpServerCapabilities],
@@ -2047,48 +2043,29 @@ $typestoExport = @(
   [McpErrorCodes],
   [McpStopReason]
 )
+# Register Type Accelerators
 $TypeAcceleratorsClass = [PsObject].Assembly.GetType('System.Management.Automation.TypeAccelerators')
-
-# Clean up old accelerators first in case of module reload
-foreach ($accelName in $removedAccelerators) {
-  if ($TypeAcceleratorsClass::Get.ContainsKey($accelName)) {
-    $TypeAcceleratorsClass::Remove($accelName)
-  }
-}
-
-# Add new accelerators
 foreach ($Type in $typestoExport) {
-  # Check if already exists (less likely now but good practice)
-  if ($TypeAcceleratorsClass::Get.ContainsKey($Type.FullName)) {
-    Write-Debug "Type accelerator '$($Type.FullName)' already exists. Skipping addition."
-  } else {
-    try {
-      $TypeAcceleratorsClass::Add($Type.FullName, $Type)
-    } catch {
-      Write-Warning "Failed to add type accelerator '$($Type.FullName)': $($_.Exception.Message)"
-    }
+  if ($Type.FullName -in $TypeAcceleratorsClass::Get.Keys) {
+    $Message = @(
+      "Unable to register type accelerator '$($Type.FullName)'"
+      'Accelerator already exists.'
+    ) -join ' - '
+    "TypeAcceleratorAlreadyExists $Message" | Write-Debug
   }
 }
-
+# Add type accelerators for every exportable type.
+foreach ($Type in $typestoExport) {
+  $TypeAcceleratorsClass::Add($Type.FullName, $Type)
+}
 # Remove type accelerators when the module is removed.
-# Combine old and new logic for robust cleanup
 $MyInvocation.MyCommand.ScriptBlock.Module.OnRemove = {
-  # Remove newly added accelerators
-  foreach ($Type in $using:typestoExport) {
-    if ($TypeAcceleratorsClass::Get.ContainsKey($Type.FullName)) {
-      $TypeAcceleratorsClass::Remove($Type.FullName)
-    }
+  foreach ($Type in $typestoExport) {
+    $TypeAcceleratorsClass::Remove($Type.FullName)
   }
-  # Also ensure old ones are removed
-  foreach ($accelName in $using:removedAccelerators) {
-    if ($TypeAcceleratorsClass::Get.ContainsKey($accelName)) {
-      $TypeAcceleratorsClass::Remove($accelName)
-    }
-  }
-}.GetNewClosure()
+}.GetNewClosure();
 
-
-$scripts = @()
+$scripts = @();
 $Public = Get-ChildItem "$PSScriptRoot/Public" -Filter "*.ps1" -Recurse -ErrorAction SilentlyContinue
 $scripts += Get-ChildItem "$PSScriptRoot/Private" -Filter "*.ps1" -Recurse -ErrorAction SilentlyContinue
 $scripts += $Public
@@ -2099,21 +2076,14 @@ foreach ($file in $scripts) {
     . "$($file.fullname)"
   } Catch {
     Write-Warning "Failed to import function $($file.BaseName): $_"
-    # Use Write-Error for better visibility consistent with logger
-    Write-Error "Failed to import function '$($file.FullName)': $($_.Exception.ToString())"
+    $host.UI.WriteErrorLine($_)
   }
 }
 
-# Export Public functions. Cmdlets are exported automatically if defined in the PSM1.
-# Check which functions are actually defined in Public/
-$publicFunctionNames = $Public | ForEach-Object { $_.BaseName }
-
 $Param = @{
-  Function = $publicFunctionNames # Export only functions found in Public/
-  Cmdlet   = '*' # Keep exporting any defined cmdlets
-  Alias    = '*' # Keep exporting any defined aliases
+  Function = $Public.BaseName
+  Cmdlet   = '*'
+  Alias    = '*'
   Verbose  = $false
 }
 Export-ModuleMember @Param
-
-Write-Debug "MCP PowerShell SDK module loaded. Logging provided by 'cliHelper.logger'."
