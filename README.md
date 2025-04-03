@@ -9,14 +9,12 @@ ver `0.1.1` **α**
 ## Installation
 
 ```PowerShell
-# Install both modules
 Install-Module MCP
 ```
 
 ## Usage
 
 ```PowerShell
-# Import necessary modules
 Import-Module MCP
 
 # --- Example Server Setup ---
