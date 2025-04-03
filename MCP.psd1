@@ -30,7 +30,7 @@
   Copyright             = 'Copyright © 2025 alain. All rights reserved.'
 
   # Description of the functionality provided by this module
-  Description           = 'Provides core framework for building MCP-compliant AI agents and tools in PowerShell.'
+  Description           = 'A PowerShell module for building MCP-compliant ai agents and tools in your terminal.'
 
   # Minimum version of the PowerShell engine required by this module
   PowerShellVersion     = '7.5'
@@ -52,7 +52,8 @@
 
   # Modules that must be imported into the global environment prior to importing this module
   RequiredModules       = @(
-    'cliHelper.logger'
+    'cliHelper.logger',
+    'ThreadJob'
   )
 
   # Assemblies that must be loaded prior to importing this module
@@ -95,7 +96,7 @@
   PrivateData           = @{
     PSData = @{
       # Tags applied to this module. These help with module discovery in online galleries.
-      Tags         = 'PowerShell', 'MCP', 'alain'
+      Tags         = 'PowerShell', 'MCP', 'ai', 'agent'
 
       # A URL to the license for this module.
       LicenseUri   = 'https://alain.mit-license.org/'
