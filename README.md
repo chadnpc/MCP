@@ -2,9 +2,11 @@
 
 A PowerShell module for building MCP-compliant ai agents and tools in your terminal.
 
-[![Downloads](https://img.shields.io/powershellgallery/dt/MCP.svg?style=flat&logo=powershell&color=blue)](https://www.powershellgallery.com/packages/MCP)
-ver `0.1.1` **α**
-
+</a>
+<a href="https://www.powershellgallery.com/packages/MCP" target="_blank" rel="noopener noreferrer">
+<img alt="Module Version" src="https://img.shields.io/powershellgallery/v/mcp?include_prereleases&style=plastic&label=MCP.psm1&labelColor=rgba(0%2C%200%2C%200%2C%201)&color=rgba(73%2C%20215%2C%2030%2C%200.7)">
+<img alt="Module Downloads" src="https://img.shields.io/powershellgallery/dt/mcp?style=flat&logo=iterm2&labelColor=rgba(0%2C%200%2C%200%2C%201)&color=rgba(73%2C%20215%2C%2030%2C%200.7)">
+</a>
 
 ## Installation
 
